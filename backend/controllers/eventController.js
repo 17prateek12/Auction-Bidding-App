@@ -226,7 +226,7 @@ exports.getEntireEventByEventId = async (req, res) => {
       return res.status(404).json({ message: "Entire event not found for the given event ID." });
     }
 
-    const genAI = new GoogleGenerativeAI("AIzaSyCME6Y3_tQ8B-PnbE79-jwYgPkyKxwcv3o"); 
+    const genAI = new GoogleGenerativeAI(""); 
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     // Create the prompt using the fetched event data
