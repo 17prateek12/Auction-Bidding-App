@@ -1,0 +1,11 @@
+api/.env
+api/node_modules
+/api/.env
+/api/node_modules
+
+site/.next
+site/.env
+site/node_modules
+/site/.env
+/site/.next
+/site/node_modules
