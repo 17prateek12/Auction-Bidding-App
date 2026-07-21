@@ -1,8 +1,9 @@
+import { API_BASE_URL } from '@/lib/env';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import Cookies from 'js-cookie';
 
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5001';
+const apiBaseUrl = API_BASE_URL;
 
 export const useAllEvents = (page = 1, limit = 50) => {
   return useQuery({

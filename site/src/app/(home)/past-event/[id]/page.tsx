@@ -9,8 +9,9 @@ import { Input } from '@/components/ui/input';
 import { ArrowLeft, Sparkles, Send, Loader2, CheckCircle2, Bot, User, Trophy, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'react-toastify';
+import { API_BASE_URL } from '@/lib/env';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+const API_URL = API_BASE_URL;
 
 interface ChatMessage {
   sender: 'user' | 'ai';

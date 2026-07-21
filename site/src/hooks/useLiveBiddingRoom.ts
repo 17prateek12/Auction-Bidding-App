@@ -5,8 +5,9 @@ import axios from 'axios';
 import Cookies from 'js-cookie';
 import { toast } from 'react-toastify';
 import { getSocket, joinEventRoom, placeBidSocket } from '@/lib/socketService';
+import { API_BASE_URL } from '@/lib/env';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+const API_URL = API_BASE_URL;
 
 export const useLiveBiddingRoom = (eventId: string) => {
   const [eventDetails, setEventDetails] = useState<any>(null);

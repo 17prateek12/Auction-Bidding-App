@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { DecodeToken } from '../interface/interface';
-import { placeBidService, getLeaderboardService } from '../services/bidService';
+import { placeBidService, getLeaderboardService, maskLeaderboardForViewer } from '../services/bidService';
 import { pool } from '../connection/postgresConfig';
 import { ApiError } from '../utils/ApiError';
 
@@ -23,7 +23,6 @@ export const bidSocketHandler = (io: Server, socket: Socket) => {
           try {
             const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET as string) as DecodeToken;
             requestingUserId = decoded.userId;
-            // Store userId on socket data
             socket.data.userId = decoded.userId;
           } catch {}
         }
@@ -100,12 +99,12 @@ export const bidSocketHandler = (io: Server, socket: Socket) => {
           rank: result.rank,
         });
 
-        // Store latest broadcast payload for 200ms throttling
+        // Store latest unmasked leaderboard payload for 200ms throttling
         const throttleKey = `event:${eventId}:item:${itemId}`;
         pendingLeaderboards[throttleKey] = {
           eventId: result.eventId,
           itemId: result.itemId,
-          rankedData: result.rankedData,
+          rankedData: result.rawLeaderboard || result.rankedData,
         };
 
         if (!broadcastTimers[throttleKey]) {
@@ -128,20 +127,11 @@ export const bidSocketHandler = (io: Server, socket: Socket) => {
                 const sUserId = roomSocket.data?.userId;
                 const isCreator = Boolean(creatorId && sUserId === creatorId);
 
-                const roleFilteredRankedData = latestData.rankedData.map((d: any) => {
-                  const isSelf = Boolean(sUserId && d.userId === sUserId);
-                  if (isCreator || isSelf) {
-                    return d;
-                  } else {
-                    return {
-                      userId: 'masked',
-                      amount: null,
-                      rank: d.rank,
-                      userName: 'Competitor',
-                      userEmail: '',
-                    };
-                  }
-                });
+                const roleFilteredRankedData = maskLeaderboardForViewer(
+                  latestData.rankedData,
+                  sUserId,
+                  isCreator
+                );
 
                 roomSocket.emit('updateLeaderboard', {
                   eventId: latestData.eventId,

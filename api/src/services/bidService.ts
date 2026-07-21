@@ -4,6 +4,38 @@ import { redis } from '../connection/redisConfig';
 import { ApiError } from '../utils/ApiError';
 import { addBidToSyncQueue } from '../workers/bidQueue';
 
+/**
+ * Reusable Helper: Masks leaderboard entries for a given viewer.
+ * Event Creator & Self see full identity and exact amount.
+ * Competitors see privacy-masked entries (userName: "Competitor", amount: null).
+ */
+export const maskLeaderboardForViewer = (
+  rankedData: Array<{ userId: string; amount: number | null; rank: number; userName?: string; userEmail?: string }>,
+  requestingUserId?: string,
+  isCreator: boolean = false
+) => {
+  return rankedData.map((d) => {
+    const isSelf = Boolean(requestingUserId && d.userId === requestingUserId);
+    if (isCreator || isSelf) {
+      return {
+        userId: d.userId,
+        amount: d.amount,
+        rank: d.rank,
+        userName: d.userName || d.userEmail || 'Bidder',
+        userEmail: d.userEmail || '',
+      };
+    } else {
+      return {
+        userId: 'masked',
+        amount: null,
+        rank: d.rank,
+        userName: 'Competitor',
+        userEmail: '',
+      };
+    }
+  });
+};
+
 export const placeBidService = async ({
   userId,
   eventId,
@@ -106,12 +138,16 @@ export const placeBidService = async ({
     rank: newRank,
   }).catch((err) => console.error('Error adding bid job to sync queue:', err));
 
+  // Mask leaderboard specifically for the HTTP bidder
+  const maskedForCaller = maskLeaderboardForViewer(rankedData, userId, false);
+
   return {
     eventId,
     itemId,
     amount,
     rank: newRank,
-    rankedData,
+    rankedData: maskedForCaller,
+    rawLeaderboard: rankedData,
   };
 };
 
@@ -178,30 +214,16 @@ export const getLeaderboardService = async (eventId: string, itemId: string, req
     }
   }
 
-  const roleFilteredData = rankedData.map((d) => {
+  const enrichedData = rankedData.map((d) => {
     const u = userMap.get(d.userId);
-    const isSelf = Boolean(requestingUserId && d.userId === requestingUserId);
-
-    if (isCreator || isSelf) {
-      // Event Creator & Self see full identity and exact amount
-      return {
-        userId: d.userId,
-        amount: d.amount,
-        rank: d.rank,
-        userName: u?.name || u?.email || 'Bidder',
-        userEmail: u?.email || '',
-      };
-    } else {
-      // Competitors see privacy-masked entry (no PII, no competitor bid price)
-      return {
-        userId: 'masked',
-        amount: null,
-        rank: d.rank,
-        userName: 'Competitor',
-        userEmail: '',
-      };
-    }
+    return {
+      ...d,
+      userName: u?.name || u?.email || 'Bidder',
+      userEmail: u?.email || '',
+    };
   });
+
+  const roleFilteredData = maskLeaderboardForViewer(enrichedData, requestingUserId, isCreator);
 
   return {
     eventId,

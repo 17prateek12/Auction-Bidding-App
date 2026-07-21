@@ -1,7 +1,8 @@
 import { io, Socket } from 'socket.io-client';
 import Cookies from 'js-cookie';
+import { API_BASE_URL } from './env';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+const SOCKET_URL = API_BASE_URL;
 
 let socket: Socket | null = null;
 

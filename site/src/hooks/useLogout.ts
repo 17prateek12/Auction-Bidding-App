@@ -5,6 +5,7 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import { toast } from 'react-toastify';
 import Cookies from "js-cookie";
+import { API_BASE_URL } from "@/lib/env";
 
 
 export const useLogout = () => {
@@ -13,7 +14,7 @@ export const useLogout = () => {
 
     return useMutation<LogoutResponse, unknown, void>({
         mutationFn: async () => {
-            const res = await axios.post(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/user/logout`, {}, {
+            const res = await axios.post(`${API_BASE_URL}/api/user/logout`, {}, {
                 headers: {
                     'Authorization': `Bearer ${accessToken}`
                 }

@@ -25,9 +25,12 @@ const placeBid = asyncHandler(
       amount,
     });
 
+    // Strip internal raw unmasked leaderboard before sending HTTP response
+    const { rawLeaderboard, ...safeResult } = result;
+
     res.status(200).json({
       message: 'Bid placed successfully',
-      ...result,
+      ...safeResult,
     });
   }
 );

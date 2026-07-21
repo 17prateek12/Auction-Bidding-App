@@ -4,13 +4,14 @@ import axios from 'axios';
 import Cookies from 'js-cookie';
 import { toast } from 'react-toastify';
 import { useRouter } from 'next/navigation';
+import { API_BASE_URL } from '@/lib/env';
 
 export const useCreateEvent = () => {
   const reset = useCreateEventStore((s) => s.reset);
   const router = useRouter();
   const token = Cookies.get('accessToken');
 
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000';
+  const apiBaseUrl = API_BASE_URL;
 
   return useMutation({
     mutationFn: async (eventPayload: any) => {
