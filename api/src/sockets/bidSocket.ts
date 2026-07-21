@@ -5,20 +5,34 @@ import { placeBidService, getLeaderboardService } from '../services/bidService';
 import { pool } from '../connection/postgresConfig';
 import { ApiError } from '../utils/ApiError';
 
+// Throttling timer map for WebSocket room broadcasts (200ms batching window)
+const broadcastTimers: Record<string, NodeJS.Timeout> = {};
+const pendingLeaderboards: Record<string, { eventId: string; itemId: string; rankedData: any[] }> = {};
+
 export const bidSocketHandler = (io: Server, socket: Socket) => {
-  // Subscribing to event room & sending initial full leaderboards
+  // Subscribing to event room & sending role-filtered initial leaderboards
   socket.on('room:join', async ({ eventId }: { eventId: string }) => {
     if (eventId) {
       socket.join(`event:${eventId}`);
-      console.log(`Socket ${socket.id} joined room event:${eventId}`);
       socket.emit('room:joined', { message: `Joined room event:${eventId}` });
 
       try {
+        const token = socket.handshake?.auth?.token;
+        let requestingUserId: string | undefined;
+        if (token) {
+          try {
+            const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET as string) as DecodeToken;
+            requestingUserId = decoded.userId;
+            // Store userId on socket data
+            socket.data.userId = decoded.userId;
+          } catch {}
+        }
+
         const itemsRes = await pool.query(`SELECT id FROM items WHERE event_id = $1`, [eventId]);
         const allLeaderboards: Record<string, any[]> = {};
 
         for (const item of itemsRes.rows) {
-          const res = await getLeaderboardService(eventId, item.id);
+          const res = await getLeaderboardService(eventId, item.id, requestingUserId);
           if (res && res.rankedData) {
             allLeaderboards[item.id] = res.rankedData;
           }
@@ -34,7 +48,7 @@ export const bidSocketHandler = (io: Server, socket: Socket) => {
     }
   });
 
-  // Real-time Bidding Event
+  // Real-time Bidding Event with Role-Based PII Masking & Throttling
   socket.on(
     'bid:place',
     async (payload: {
@@ -60,6 +74,7 @@ export const bidSocketHandler = (io: Server, socket: Socket) => {
             authToken,
             process.env.ACCESS_TOKEN_SECRET as string
           ) as DecodeToken;
+          socket.data.userId = decoded.userId;
         } catch (err) {
           return socket.emit('bid:error', {
             status: 401,
@@ -75,7 +90,7 @@ export const bidSocketHandler = (io: Server, socket: Socket) => {
           amount: Number(amount),
         });
 
-        // Emit Success to Client
+        // Emit Success directly to Bidder Socket
         socket.emit('bid:success', {
           status: 200,
           message: 'Bid placed successfully',
@@ -85,15 +100,61 @@ export const bidSocketHandler = (io: Server, socket: Socket) => {
           rank: result.rank,
         });
 
-        // Broadcast updated leaderboard to ALL room members
-        io.to(`event:${eventId}`).emit('updateLeaderboard', {
+        // Store latest broadcast payload for 200ms throttling
+        const throttleKey = `event:${eventId}:item:${itemId}`;
+        pendingLeaderboards[throttleKey] = {
           eventId: result.eventId,
           itemId: result.itemId,
           rankedData: result.rankedData,
-        });
-      } catch (error: any) {
-        console.error('Error placing bid via socket:', error);
+        };
 
+        if (!broadcastTimers[throttleKey]) {
+          broadcastTimers[throttleKey] = setTimeout(async () => {
+            delete broadcastTimers[throttleKey];
+            const latestData = pendingLeaderboards[throttleKey];
+            delete pendingLeaderboards[throttleKey];
+
+            if (!latestData) return;
+
+            try {
+              // Fetch Event Creator ID
+              const evRes = await pool.query(`SELECT creator_id FROM events WHERE id = $1`, [latestData.eventId]);
+              const creatorId = evRes.rows.length > 0 ? evRes.rows[0].creator_id : null;
+
+              // Broadcast role-filtered payloads to sockets in room
+              const roomSockets = await io.in(`event:${latestData.eventId}`).fetchSockets();
+
+              for (const roomSocket of roomSockets) {
+                const sUserId = roomSocket.data?.userId;
+                const isCreator = Boolean(creatorId && sUserId === creatorId);
+
+                const roleFilteredRankedData = latestData.rankedData.map((d: any) => {
+                  const isSelf = Boolean(sUserId && d.userId === sUserId);
+                  if (isCreator || isSelf) {
+                    return d;
+                  } else {
+                    return {
+                      userId: 'masked',
+                      amount: null,
+                      rank: d.rank,
+                      userName: 'Competitor',
+                      userEmail: '',
+                    };
+                  }
+                });
+
+                roomSocket.emit('updateLeaderboard', {
+                  eventId: latestData.eventId,
+                  itemId: latestData.itemId,
+                  rankedData: roleFilteredRankedData,
+                });
+              }
+            } catch (bErr) {
+              console.error('Error broadcasting throttled leaderboard:', bErr);
+            }
+          }, 200); // 200ms Throttling Window
+        }
+      } catch (error: any) {
         if (error instanceof ApiError) {
           return socket.emit('bid:error', {
             status: error.statusCode,

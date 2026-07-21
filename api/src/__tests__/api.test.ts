@@ -3,7 +3,7 @@ import app from '../app/app';
 import { pool } from '../connection/postgresConfig';
 import { seedDatabase } from '../scripts/seedEvents';
 
-describe('Backend API Integration Tests', () => {
+describe('Backend API Integration Tests & Fault Tolerance Validation', () => {
   let authToken: string;
 
   beforeAll(async () => {
@@ -28,7 +28,14 @@ describe('Backend API Integration Tests', () => {
     await pool.end();
   });
 
-  describe('1. Authentication Endpoints', () => {
+  describe('1. Authentication & Security Endpoints', () => {
+    it('should return system health status on GET /api/health', async () => {
+      const res = await request(app).get('/api/health');
+      expect([200, 503]).toContain(res.status);
+      expect(res.body).toHaveProperty('status');
+      expect(res.body).toHaveProperty('services');
+    });
+
     it('should login successfully with valid user credentials (17prateek12@gmail.com)', async () => {
       const res = await request(app)
         .post('/api/users/login')
@@ -52,6 +59,19 @@ describe('Backend API Integration Tests', () => {
         });
 
       expect([400, 401]).toContain(res.status);
+    });
+
+    it('should reject unauthenticated requests to GET /api/bid/leaderboard', async () => {
+      const res = await request(app).get('/api/bid/leaderboard?eventId=test&itemId=test');
+      expect([401, 403]).toContain(res.status);
+    });
+
+    it('should reject unauthenticated requests to cron endpoints', async () => {
+      const res1 = await request(app).post('/update-event');
+      expect([401, 403]).toContain(res1.status);
+
+      const res2 = await request(app).get('/api/event/eventEnd');
+      expect([401, 403]).toContain(res2.status);
     });
   });
 

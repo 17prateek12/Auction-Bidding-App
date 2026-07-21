@@ -2,11 +2,11 @@ import { redis } from '../connection/redisConfig';
 
 /**
  * Reverse Auction Atomic Lua Script
- * In Reverse Auctions (Procurement Sourcing):
+ * Enforces Reverse Auction Rules:
  * - Lower bid amount = Higher/Better Rank (Rank 1 is the lowest bid).
- * - Bidders can update/lower their bid at any time.
- * - ZADD adds/updates the bidder's score in the Redis Sorted Set.
- * - ZRANK returns the 0-indexed ascending rank (lowest score = rank 0, which corresponds to Rank #1).
+ * - "Always Improve" Rule: If user has an existing bid, new bid MUST be strictly lower.
+ * - ZADD updates the bidder's score in the Redis Sorted Set.
+ * - ZRANK returns 0-indexed ascending rank (lowest score = Rank #1).
  */
 export const PLACE_BID_LUA = `
 local bidsKey = KEYS[1]
@@ -17,10 +17,20 @@ if not bidAmount or bidAmount <= 0 then
     return {0, "Bid amount must be a positive number"}
 end
 
+-- Check user's existing bid score
+local currentScore = redis.call('zscore', bidsKey, userId)
+
+if currentScore then
+    local currentBid = tonumber(currentScore)
+    if bidAmount >= currentBid then
+        return {0, "Bid must be lower than your current bid"}
+    end
+end
+
 -- Add or update the user's bid in Redis ZSET (Score = bidAmount)
 redis.call('zadd', bidsKey, bidAmount, userId)
 
--- Get the reverse auction rank using ZRANK (ascending order: lowest score gets rank 0)
+-- Get the reverse auction rank using ZRANK (ascending order: lowest score = rank 0)
 local rank = redis.call('zrank', bidsKey, userId)
 
 if rank ~= nil then
@@ -43,7 +53,7 @@ export interface LuaBidResponse {
 
 /**
  * Places a bid atomically using a Redis Lua script.
- * Calculates reverse-auction rank (lowest score = Rank 1) using ZSET and ZRANK.
+ * Enforces reverse auction "Always Improve" rule and calculates ZRANK.
  */
 export const placeBidAtomically = async (
   bidsKey: string,

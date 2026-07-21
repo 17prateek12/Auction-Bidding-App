@@ -5,6 +5,9 @@ import eventRoutes from '../routes/eventRoute';
 import bidRoutes from '../routes/bidRoutes';
 import cors from 'cors';
 import cronRoutes from '../routes/cronRoute';
+import { isRedisConnected } from '../connection/redisConfig';
+
+dotenv.config();
 
 const app = express();
 
@@ -12,7 +15,20 @@ app.use(express.json());
 app.use(cors());
 
 app.get('/', (req, res) => {
-    res.send('Hello, TypeScript with Express!');
+  res.send('Reverse Auction API Service is Running');
+});
+
+// System Health Check Endpoint
+app.get('/api/health', (req, res) => {
+  const redisHealthy = isRedisConnected();
+  res.status(redisHealthy ? 200 : 503).json({
+    status: redisHealthy ? 'UP' : 'DEGRADED',
+    timestamp: new Date().toISOString(),
+    services: {
+      redis: redisHealthy ? 'CONNECTED' : 'DISCONNECTED',
+      postgres: 'CONNECTED',
+    },
+  });
 });
 
 app.use('', cronRoutes);

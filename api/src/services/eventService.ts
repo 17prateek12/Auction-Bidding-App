@@ -14,30 +14,19 @@ export const createEventService = async ({
 }: {
   creatorId: string;
   name: string;
-  description: string;
+  description?: string;
   startTime: Date;
   endTime: Date;
   eventDate: Date;
   columns: string[];
-  rows: Record<string, any>[];
+  rows: Array<Record<string, any>>;
 }) => {
-  if (
-    !creatorId ||
-    !name ||
-    !startTime ||
-    !endTime ||
-    !columns ||
-    !rows ||
-    rows.length === 0
-  ) {
-    throw new ApiError(
-      400,
-      'Missing required fields (creatorId, name, startTime, endTime, columns, rows)'
-    );
+  if (!creatorId || !name || !startTime || !endTime || !columns || !rows) {
+    throw new ApiError(400, 'All required event fields must be provided');
   }
 
   const now = new Date();
-  if (startTime < now && Math.abs(startTime.getTime() - now.getTime()) > 5 * 60 * 1000) {
+  if (startTime < now && Math.abs(startTime.getTime() - now.getTime()) > 60000) {
     throw new ApiError(400, 'Start time cannot be in the past');
   }
 
@@ -45,47 +34,48 @@ export const createEventService = async ({
     throw new ApiError(400, 'End time must be after start time');
   }
 
-  let eventStatus: 'upcoming' | 'active' | 'ended' = 'active';
-  if (now < startTime && (startTime.getTime() - now.getTime()) > 5 * 60 * 1000) {
-    eventStatus = 'upcoming';
+  let status = 'upcoming';
+  if (now >= startTime && now < endTime) {
+    status = 'active';
   } else if (now >= endTime) {
-    eventStatus = 'ended';
+    status = 'ended';
   }
 
-  const eventQuery = `
+  // Insert Event Record
+  const eventInsertRes = await pool.query(
+    `
     INSERT INTO events (creator_id, name, description, start_time, end_time, event_date, event_status, columns)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *;
-  `;
-  const eventValues = [
-    creatorId,
-    name,
-    description || '',
-    startTime,
-    endTime,
-    eventDate || startTime,
-    eventStatus,
-    JSON.stringify(columns),
-  ];
+  `,
+    [
+      creatorId,
+      name,
+      description || '',
+      startTime,
+      endTime,
+      eventDate || startTime,
+      status,
+      JSON.stringify(columns),
+    ]
+  );
 
-  const eventRes = await pool.query(eventQuery, eventValues);
-  const savedEvent = eventRes.rows[0];
+  const savedEvent = eventInsertRes.rows[0];
+  const eventId = savedEvent.id;
 
+  // Bulk Batch Insert Items in chunks of 500
+  const CHUNK_SIZE = 500;
   const savedItems: any[] = [];
-  const chunkSize = 500;
 
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize);
+  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + CHUNK_SIZE);
     const valueTuples: string[] = [];
     const queryParams: any[] = [];
     let paramIndex = 1;
 
     for (const row of chunk) {
-      const columnData = Object.fromEntries(
-        Object.entries(row).map(([key, value]) => [key, String(value)])
-      );
       valueTuples.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2})`);
-      queryParams.push(savedEvent.id, JSON.stringify(columnData), creatorId);
+      queryParams.push(eventId, JSON.stringify(row), creatorId);
       paramIndex += 3;
     }
 
@@ -150,6 +140,7 @@ export const getEventItemsByIdService = async (eventId: string) => {
 
   return {
     event: fetchEventRes.rows[0],
+    items: fetchItemsRes.rows,
     item: fetchItemsRes.rows,
   };
 };

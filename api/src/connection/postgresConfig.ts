@@ -7,11 +7,15 @@ const connectionString =
   process.env.DATABASE_URL ||
   'postgresql://postgres:postgrespassword@localhost:5436/auction_db';
 
-const pool = new Pool({
+export const pool = new Pool({
   connectionString,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+});
+
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle PostgreSQL client:', err);
 });
 
 export const initPostgresDb = async () => {
@@ -19,17 +23,18 @@ export const initPostgresDb = async () => {
     const client = await pool.connect();
     console.log('Successfully connected to PostgreSQL Database');
 
-    // Create DDL Tables & Indexes
-    await client.query(`
-      CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+    // Enable pgcrypto extension for UUIDs
+    await client.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
 
+    // DDL Schemas Initialization
+    await client.query(`
       -- Users Table
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        registration_time TEXT NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        registration_time VARCHAR(255) NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
 
@@ -37,46 +42,43 @@ export const initPostgresDb = async () => {
       CREATE TABLE IF NOT EXISTS events (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         creator_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
-        description TEXT DEFAULT '',
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
         start_time TIMESTAMPTZ NOT NULL,
         end_time TIMESTAMPTZ NOT NULL,
         event_date TIMESTAMPTZ NOT NULL,
-        event_status TEXT NOT NULL DEFAULT 'upcoming' CHECK (event_status IN ('upcoming', 'active', 'ended')),
-        columns JSONB NOT NULL DEFAULT '[]'::jsonb,
+        event_status VARCHAR(50) NOT NULL DEFAULT 'upcoming',
+        columns JSONB NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
 
-      CREATE INDEX IF NOT EXISTS idx_events_status ON events(event_status);
-      CREATE INDEX IF NOT EXISTS idx_events_creator ON events(creator_id, event_status);
-
-      -- Items Table
+      -- Items Catalog Table
       CREATE TABLE IF NOT EXISTS items (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-        column_data JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        column_data JSONB NOT NULL,
+        created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
 
-      CREATE INDEX IF NOT EXISTS idx_items_event ON items(event_id);
-
-      -- Participants Table
+      -- Event Participants Table
       CREATE TABLE IF NOT EXISTS participants (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        PRIMARY KEY (event_id, user_id)
+        CONSTRAINT unique_event_participant UNIQUE (event_id, user_id)
       );
 
-      -- Bids Table
+      -- Live Bids Table
       CREATE TABLE IF NOT EXISTS bids (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
         item_id UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        amount NUMERIC(12, 2) NOT NULL,
-        rank INT NOT NULL,
+        amount NUMERIC(15, 2) NOT NULL,
+        rank INT NOT NULL DEFAULT 1,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT unique_user_item_bid UNIQUE (event_id, item_id, user_id)
       );
@@ -94,7 +96,7 @@ export const initPostgresDb = async () => {
       );
     `);
 
-    // Creator Participant Validation Trigger
+    // Creator Bid Prevention Trigger (Wired directly to bids table)
     await client.query(`
       CREATE OR REPLACE FUNCTION check_creator_bidding()
       RETURNS TRIGGER AS $$
@@ -110,16 +112,16 @@ export const initPostgresDb = async () => {
       $$ LANGUAGE plpgsql;
 
       DROP TRIGGER IF EXISTS trg_check_creator_bidding ON participants;
-      CREATE TRIGGER trg_check_creator_bidding
-      BEFORE INSERT ON participants
+      DROP TRIGGER IF EXISTS trg_check_creator_bidding_bids ON bids;
+
+      CREATE TRIGGER trg_check_creator_bidding_bids
+      BEFORE INSERT OR UPDATE ON bids
       FOR EACH ROW EXECUTE FUNCTION check_creator_bidding();
     `);
 
     client.release();
     console.log('PostgreSQL DDL Schemas & Triggers Initialized Successfully');
   } catch (error) {
-    console.error('Error connecting/initializing PostgreSQL:', error);
+    console.error('Error initializing PostgreSQL DDL tables:', error);
   }
 };
-
-export { pool };

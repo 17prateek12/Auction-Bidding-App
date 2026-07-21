@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import Cookies from 'js-cookie';
 import { toast } from 'react-toastify';
@@ -9,52 +9,66 @@ import { getSocket, joinEventRoom, placeBidSocket } from '@/lib/socketService';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
 
 export const useLiveBiddingRoom = (eventId: string) => {
-  const [eventData, setEventData] = useState<any>(null);
-  const [items, setItems] = useState<any[]>([]);
+  const [eventDetails, setEventDetails] = useState<any>(null);
   const [columns, setColumns] = useState<string[]>([]);
-  const [leaderboards, setLeaderboards] = useState<Record<string, any[]>>({});
-  const [userBids, setUserBids] = useState<Record<string, { amount: number; rank: number }>>({});
+  const [items, setItems] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isError, setIsError] = useState<boolean>(false);
+  const [isEventEnded, setIsEventEnded] = useState<boolean>(false);
+
+  // Leaderboards state: { itemId: Array<{ userId, amount, rank, userName }> }
+  const [leaderboards, setLeaderboards] = useState<Record<string, any[]>>({});
+
+  // Current User's Bids & Ranks state: { itemId: { amount, rank } }
+  const [userBids, setUserBids] = useState<Record<string, { amount: number; rank: number }>>({});
+
   const [submittingItemId, setSubmittingItemId] = useState<string | null>(null);
 
-  const currentUserId = Cookies.get('userId');
+  // Extract User ID from Cookie or decode JWT token
+  const currentUserId = useMemo(() => {
+    const cookieUserId = Cookies.get('userId');
+    if (cookieUserId) return cookieUserId;
 
-  // Compute if event has ended based on status or end_time
-  const isEventEnded = Boolean(
-    eventData?.event_status === 'ended' ||
-    (eventData?.end_time && new Date() >= new Date(eventData.end_time))
-  );
-
-  // Helper to extract own user rank & amount from a leaderboard array
-  const extractUserBid = useCallback((rankedData: any[], userId?: string) => {
-    if (!userId || !Array.isArray(rankedData)) return null;
-    const myBid = rankedData.find(
-      (b: any) => b.userId === userId || b.user_id === userId
-    );
-    if (myBid) {
-      return {
-        amount: parseFloat(myBid.amount),
-        rank: myBid.rank,
-      };
+    const token = Cookies.get('token') || Cookies.get('accessToken');
+    if (token) {
+      try {
+        const payloadBase64 = token.split('.')[1];
+        if (payloadBase64) {
+          const decoded = JSON.parse(atob(payloadBase64));
+          return decoded.userId || decoded.id;
+        }
+      } catch {}
     }
-    return null;
+    return undefined;
   }, []);
 
-  // Fetch Event Data & Items from /api/event/user-event/:id
+  // Fetch Event Details & Items
   const fetchEventItems = useCallback(async () => {
     if (!eventId) return;
+    setIsLoading(true);
     try {
-      setIsLoading(true);
       const token = Cookies.get('token') || Cookies.get('accessToken');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-      const res = await axios.get(`${API_URL}/api/event/user-event/${eventId}`, { headers });
-      const event = res.data.event || {};
-      const itemsList = res.data.item || res.data.items || [];
+      const response = await axios.get(`${API_URL}/api/event/user-event/${eventId}`, {
+        headers,
+      });
 
-      setEventData(event);
-      setItems(itemsList);
+      const data = response.data;
+      const event = data.event || data;
+      const itemList = data.items || [];
+
+      setEventDetails(event);
+      setItems(itemList);
+
+      // Check if event end time has passed
+      if (event.end_time) {
+        const now = new Date();
+        const endTime = new Date(event.end_time);
+        if (now >= endTime || event.event_status === 'ended') {
+          setIsEventEnded(true);
+        }
+      }
 
       let parsedCols: string[] = [];
       if (Array.isArray(event.columns)) {
@@ -80,6 +94,24 @@ export const useLiveBiddingRoom = (eventId: string) => {
     fetchEventItems();
   }, [fetchEventItems]);
 
+  // Helper to extract user's own bid and rank from rankedData array
+  const extractUserBid = useCallback((rankedData: any[], userId?: string) => {
+    if (!Array.isArray(rankedData)) return null;
+    const myBid = rankedData.find(
+      (b: any) =>
+        (userId && (b.userId === userId || b.user_id === userId)) ||
+        (b.userId && b.userId !== 'masked')
+    );
+
+    if (myBid && myBid.amount !== null && myBid.rank !== null) {
+      return {
+        amount: parseFloat(myBid.amount),
+        rank: parseInt(myBid.rank, 10),
+      };
+    }
+    return null;
+  }, []);
+
   // HTTP Polling Fallback (fetches latest user ranks & item leaderboards every 3s)
   const pollLeaderboardsAndRanks = useCallback(async () => {
     if (!eventId || items.length === 0) return;
@@ -96,7 +128,7 @@ export const useLiveBiddingRoom = (eventId: string) => {
             if (b.itemId && b.amount !== null && b.rank !== null) {
               newUserBids[b.itemId] = {
                 amount: parseFloat(b.amount),
-                rank: b.rank,
+                rank: parseInt(b.rank, 10),
               };
             }
           });
@@ -108,7 +140,7 @@ export const useLiveBiddingRoom = (eventId: string) => {
       const newLeaderboards: Record<string, any[]> = {};
       for (const item of items) {
         const itemId = item.id || item._id;
-        const lbRes = await axios.get(`${API_URL}/api/bid/leaderboard?eventId=${eventId}&itemId=${itemId}`);
+        const lbRes = await axios.get(`${API_URL}/api/bid/leaderboard?eventId=${eventId}&itemId=${itemId}`, { headers });
         if (lbRes.data?.rankedData && Array.isArray(lbRes.data.rankedData)) {
           newLeaderboards[itemId] = lbRes.data.rankedData;
         }
@@ -141,14 +173,14 @@ export const useLiveBiddingRoom = (eventId: string) => {
       if (data && data.leaderboards) {
         setLeaderboards(data.leaderboards);
 
-        if (currentUserId) {
-          const newUserBids: Record<string, { amount: number; rank: number }> = {};
-          Object.entries(data.leaderboards).forEach(([itemId, rankedData]: [string, any]) => {
-            const userBid = extractUserBid(rankedData, currentUserId);
-            if (userBid) {
-              newUserBids[itemId] = userBid;
-            }
-          });
+        const newUserBids: Record<string, { amount: number; rank: number }> = {};
+        Object.entries(data.leaderboards).forEach(([itemId, rankedData]: [string, any]) => {
+          const userBid = extractUserBid(rankedData, currentUserId);
+          if (userBid) {
+            newUserBids[itemId] = userBid;
+          }
+        });
+        if (Object.keys(newUserBids).length > 0) {
           setUserBids((prev) => ({ ...prev, ...newUserBids }));
         }
       }
@@ -163,14 +195,12 @@ export const useLiveBiddingRoom = (eventId: string) => {
           [itemId]: rankedData,
         }));
 
-        if (currentUserId) {
-          const userBid = extractUserBid(rankedData, currentUserId);
-          if (userBid) {
-            setUserBids((prev) => ({
-              ...prev,
-              [itemId]: userBid,
-            }));
-          }
+        const userBid = extractUserBid(rankedData, currentUserId);
+        if (userBid) {
+          setUserBids((prev) => ({
+            ...prev,
+            [itemId]: userBid,
+          }));
         }
       }
     };
@@ -178,6 +208,15 @@ export const useLiveBiddingRoom = (eventId: string) => {
     const handleBidSuccess = (data: any) => {
       toast.success(`🎉 Bid of $${data.amount} placed! (Rank #${data.rank})`);
       setSubmittingItemId(null);
+      if (data.itemId && data.rank && data.amount) {
+        setUserBids((prev) => ({
+          ...prev,
+          [data.itemId]: {
+            amount: parseFloat(data.amount),
+            rank: parseInt(data.rank, 10),
+          },
+        }));
+      }
     };
 
     const handleBidError = (data: any) => {
@@ -223,17 +262,21 @@ export const useLiveBiddingRoom = (eventId: string) => {
             { eventId, itemId, amount },
             { headers: { Authorization: `Bearer ${token}` } }
           );
-          if (res.data?.rank) {
+
+          toast.success(`🎉 Bid placed! (Rank #${res.data.rank})`);
+          if (res.data.rank && res.data.amount) {
             setUserBids((prev) => ({
               ...prev,
-              [itemId]: { amount, rank: res.data.rank },
+              [itemId]: {
+                amount: parseFloat(res.data.amount),
+                rank: parseInt(res.data.rank, 10),
+              },
             }));
           }
-          toast.success(`🎉 Bid of $${amount} placed!`);
-          setSubmittingItemId(null);
         }
-      } catch (error: any) {
-        toast.error(error.response?.data?.message || 'Failed to place bid.');
+      } catch (err: any) {
+        toast.error(err?.response?.data?.message || 'Failed to place bid.');
+      } finally {
         setSubmittingItemId(null);
       }
     },
@@ -241,14 +284,15 @@ export const useLiveBiddingRoom = (eventId: string) => {
   );
 
   return {
-    eventData,
-    items,
+    eventData: eventDetails,
+    eventDetails,
     columns,
-    leaderboards,
-    userBids,
+    items,
     isLoading,
     isError,
     isEventEnded,
+    leaderboards,
+    userBids,
     submittingItemId,
     placeBid,
     refetch: fetchEventItems,
