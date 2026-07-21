@@ -1,12 +1,11 @@
-'use client'
-import React from "react";
-import { useCreateEventStore } from "@/store/create-event-form-store";
-import CreateEventDate from "./create-event-date-picker";
-import { EventForm, TimeObject } from "@/types/create-event-type";
+'use client';
+import React from 'react';
+import { useCreateEventStore } from '@/store/create-event-form-store';
+import CreateEventDate from './create-event-date-picker';
+import { EventForm, TimeObject } from '@/types/create-event-type';
 
 const EventDateTimePicker = () => {
-
-  const { eventDate, endDate } = useCreateEventStore((s) => s.data);
+  const { eventDate } = useCreateEventStore((s) => s.data);
   const setField = useCreateEventStore((s) => s.setField);
 
   const [eventStartTime, setEventStartTime] = React.useState<TimeObject>({ hours: 9, minutes: 0 });
@@ -29,13 +28,6 @@ const EventDateTimePicker = () => {
     if (field === 'eventDate') {
       setField('eventDate', value);
       setField('startTime', getISOTime(value, eventStartTime));
-      if (endDate) {
-        setField('endTime', getISOTime(endDate, eventEndTime));
-      }
-    }
-
-    if (field === 'endDate') {
-      setField('endDate', value);
       setField('endTime', getISOTime(value, eventEndTime));
     }
 
@@ -46,21 +38,18 @@ const EventDateTimePicker = () => {
 
     if (field === 'eventendTime') {
       setEventEndTime(value);
-      setField('endTime', getISOTime(endDate ?? eventDate, value));
+      setField('endTime', getISOTime(eventDate, value));
     }
   };
 
   return (
     <CreateEventDate
-      startDate={eventDate}
-      endDate={endDate}
+      eventDate={eventDate}
       eventstartTime={eventStartTime}
       eventendTime={eventEndTime}
       onChange={handleFieldChange}
     />
-  )
+  );
 };
-
-
 
 export default EventDateTimePicker;

@@ -1,529 +1,298 @@
 'use client';
-import React, { useRef, useMemo, useCallback, useEffect } from 'react'
-import AllButton from '../reusable-components/all-button'
+
+import React, { useRef } from 'react';
 import { useCreateEventStore } from '@/store/create-event-form-store';
+import { useCreateEvent } from '@/hooks/useCreateEvent';
 import { Input } from '../ui/input';
 import * as XLSX from 'xlsx';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Plus, PlusCircle, Upload, CheckCircle2, RotateCcw, FileSpreadsheet } from 'lucide-react';
 import { Button } from '../ui/button';
 import { toast } from 'react-toastify';
-import { VariableSizeGrid as Grid } from 'react-window';
-import AutoSizer from 'react-virtualized-auto-sizer';
-
-
 
 const RowColumnCreator = () => {
-    const { data, setField } = useCreateEventStore();
-    const { columns, rows } = data;
-    const inputRef = useRef<HTMLInputElement | null>(null);
+  const { data, setField, reset: resetStore } = useCreateEventStore();
+  const { columns, rows } = data;
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const createEventMutation = useCreateEvent();
 
-    const gridRef = useRef<Grid>(null);
+  const addColumn = () => {
+    const colName = `Column ${columns.length + 1}`;
+    setField('columns', [...columns, colName]);
+  };
 
-    const rowHeights = useMemo(() => rows.map(() => 50), [rows]);
-    const getRowHeight = useCallback((index: number) => rowHeights[index], [rowHeights]);
+  const updateColumnName = (index: number, newName: string) => {
+    const oldName = columns[index];
+    const updatedCols = [...columns];
+    updatedCols[index] = newName;
+    setField('columns', updatedCols);
 
-    const defaultColumnWidth = 200;
+    // Update row keys to match new column name
+    const updatedRows = rows.map((row) => {
+      const newRow = { ...row };
+      if (oldName in newRow) {
+        newRow[newName] = newRow[oldName];
+        delete newRow[oldName];
+      }
+      return newRow;
+    });
+    setField('rows', updatedRows);
+  };
 
-    //const columnWidths = useMemo(() => {
-    //    return [...columns.map(() => 200), 80]; // 80 for the Action column
-    //}, [columns]);
-    const width = window.innerWidth;
+  const deleteColumn = (index: number) => {
+    const colToDelete = columns[index];
+    const updatedCols = columns.filter((_, i) => i !== index);
+    setField('columns', updatedCols);
 
-    const columnWidths = useMemo(() => {
-        const actionColWidth = 80;
-        const minColWidth = 200;
-        const dynamicColsCount = columns.length;
-      
-        const availableWidth = width - actionColWidth;
-        const idealColWidth = availableWidth / dynamicColsCount;
-      
-        // If there's more space, distribute it. Otherwise, fall back to minColWidth
-        const actualColWidth = Math.max(minColWidth, Math.floor(idealColWidth));
-      
-        return [...Array(dynamicColsCount).fill(actualColWidth), actionColWidth];
-      }, [columns, width]);
+    const updatedRows = rows.map((row) => {
+      const newRow = { ...row };
+      delete newRow[colToDelete];
+      return newRow;
+    });
+    setField('rows', updatedRows);
+  };
 
-    const getColumnwidth = useCallback(
-        (index: number) => columnWidths[index] ?? defaultColumnWidth,
-        [columnWidths]
-    );
+  const addRow = () => {
+    if (columns.length === 0) {
+      toast.warn('Please add at least one column first.');
+      return;
+    }
+    const newRow = Object.fromEntries(columns.map((col) => [col, '']));
+    setField('rows', [...rows, newRow]);
+  };
 
-    useEffect(() => {
-        gridRef.current?.resetAfterColumnIndex(0, true);
-    }, [columns]);
+  const deleteRow = (index: number) => {
+    const updatedRows = rows.filter((_, i) => i !== index);
+    setField('rows', updatedRows);
+  };
 
-
-    const addColumn = () => {
-        const newCol = prompt('Enter column name');
-        if (!newCol || columns.includes(newCol)) return;
-
-        const updatedColumns = [...columns, newCol];
-        const updatedRows = rows.map((row, idx) => ({
-            ...row,
-            [newCol]: ''
-        }));
-
-        setField('columns', updatedColumns);
-        setField('rows', updatedRows);
+  const updateCell = (rowIndex: number, colKey: string, value: string) => {
+    const updatedRows = [...rows];
+    updatedRows[rowIndex] = {
+      ...updatedRows[rowIndex],
+      [colKey]: value,
     };
+    setField('rows', updatedRows);
+  };
 
+  const handleFileClick = () => {
+    inputRef.current?.click();
+  };
 
-    const addRow = () => {
-        const newRow = Object.fromEntries(columns.map((col, idx) => [col, '']));
-        setField('rows', [...rows, newRow]);
-        console.log([...rows, newRow])
-    };
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    const deleteColumn = (colIdx: number) => {
-        const updateColumn = columns.filter((_, index) => index !== colIdx);
-        const updateRow = rows.map(row => {
-            if (Array.isArray(row)) {
-                return row.filter((_: unknown, index: number) => index !== colIdx);
-            } else {
-                const keyToRemove = columns[colIdx];
-                const { [keyToRemove]: _, ...rest } = row;
-                return rest;
-            }
-        });
-        setField('columns', updateColumn);
-        setField('rows', updateRow);
+    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls') && !file.name.endsWith('.csv')) {
+      toast.warn('Please upload an Excel file (.xlsx, .xls) or CSV.');
+      return;
     }
 
-    const deleteRow = (rowIdx: number) => {
-        const updateRow = rows.filter((_, index) => index !== rowIdx);
-        setField('rows', updateRow);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const fileData = evt.target?.result;
+      if (!(fileData instanceof ArrayBuffer)) return;
+      try {
+        const workbook = XLSX.read(fileData, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet);
+
+        if (jsonData.length === 0) {
+          toast.warn('Uploaded file is empty.');
+          return;
+        }
+
+        const newColumns = Object.keys(jsonData[0]);
+        setField('columns', newColumns);
+        setField('rows', jsonData);
+        toast.success(`Excel upload successful! Loaded ${jsonData.length} items.`);
+      } catch (error) {
+        console.error('Error parsing Excel File:', error);
+        toast.error('Failed to parse Excel file.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleCreateEventSubmit = () => {
+    if (!data.eventName || !data.eventDate || !data.startTime || !data.endTime) {
+      toast.warn('Please fill in Event Name, Pick Event Date, Start Time, and End Time.');
+      return;
     }
+    if (data.rows.length === 0) {
+      toast.warn('Please add at least one item row or upload an Excel file.');
+      return;
+    }
+    createEventMutation.mutate(data);
+  };
 
-    const updateCell = (rowIndex: number, column: string, value: string) => {
-        const updateRows = [...rows];
-        updateRows[rowIndex][column] = value;
-        setField('rows', updateRows);
-    };
+  return (
+    <div className="w-full flex flex-col gap-5 mt-6">
+      {/* Top Action Toolbar */}
+      <div className="flex items-center justify-between gap-4 flex-wrap w-full bg-gray-900/90 p-4 rounded-xl border border-gray-700/80 backdrop-blur-md">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addColumn}
+            className="bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-600 flex items-center gap-1.5"
+          >
+            <Plus className="w-4 h-4 text-blue-400" /> Add Column
+          </Button>
 
-    const handleFileClick = () => {
-        inputRef.current?.click();
-    };
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addRow}
+            className="bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-600 flex items-center gap-1.5"
+          >
+            <PlusCircle className="w-4 h-4 text-emerald-400" /> Add Row
+          </Button>
 
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
+          <input
+            type="file"
+            accept=".xlsx, .xls, .csv"
+            className="hidden"
+            ref={inputRef}
+            onChange={handleFileUpload}
+          />
 
-        if (!file) {
-            return;
-        }
-
-        if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
-            toast.warn('Invalid file type. Please upload an Excel file.');
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-            const data = evt.target?.result;
-            if (!(data instanceof ArrayBuffer)) {
-                return;
-            }
-            try {
-                const workbook = XLSX.read(data, { type: 'array' });
-                const sheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[sheetName];
-                const jsonData: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet);
-
-                console.log("Excel JSON Data:", jsonData);
-
-                if (jsonData.length === 0) {
-                    return;
-                }
-
-                const newColumn = Object.keys(jsonData[0]);
-                setField('columns', newColumn);
-                setField('rows', jsonData);
-                toast.success('Excel upload successfully');
-            } catch (error) {
-                console.error('Error parsing Excel File', error);
-                toast.error(error as string);
-            }
-
-        };
-        reader.readAsArrayBuffer(file);
-    };
-
-    const gridTotalWidth = useMemo(() => columnWidths.reduce((acc, w) => acc + w, 0), [columnWidths]);
-
-
-    return (
-        <div className='flex flex-col gap-2 mt-4 overflow-hidden relative'>
-            <div className='flex items-center justify-between gap-4 flex-wrap w-full'>
-                <div className='flex items-center gap-4 flex-wrap'>
-                    <AllButton text={'Add Column'} onClick={addColumn} />
-                    <AllButton text={'Add Row'} onClick={addRow} />
-                    <Input
-                        type='file'
-                        accept='.xlsx, .xls'
-                        className='hidden'
-                        ref={inputRef}
-                        onChange={handleFileUpload} />
-                    <AllButton text={'Upload File'} onClick={handleFileClick} />
-                </div>
-                <div className='flex items-center gap-4 flex-wrap'>
-                    <AllButton text={'Submit'} onClick={addRow} />
-                    <AllButton text={'Reset'} onClick={addRow} />
-                </div>
-            </div>
-            {columns.length !== 0 ?
-                (
-                        <div className="w-full flex-1 relative overflow-hidden">
-                        <div
-                          className=" mx-auto overflow-x-auto border border-gray-200 rounded-md"
-                          style={{
-                            minWidth: '300px',       // mobile minimum
-                            scrollbarWidth:'none',
-                            maxWidth:1200,
-                            //width: `${gridTotalWidth}px`,
-                            width:'100%'
-
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: `${gridTotalWidth}px`, // dynamic width based on columns
-                              minWidth: '100%',             // never shrink below container
-                            }}
-                          >
-                            {/* Header */}
-                            <div className="flex">
-                              {columns.map((col, index) => (
-                                <div
-                                  key={index}
-                                  style={{ width: columnWidths[index] }}
-                                  className="flex items-center justify-between px-2 py-2 border-r bg-gray-100"
-                                >
-                                  <span>{col}</span>
-                                  <Button
-                                    onClick={() => deleteColumn(index)}
-                                    className="p-1 bg-transparent hover:text-red-500 text-black"
-                                  >
-                                    <Trash2 size={16} />
-                                  </Button>
-                                </div>
-                              ))}
-                              <div
-                                style={{ width: columnWidths[columns.length] }}
-                                className="bg-gray-100 flex items-center justify-center border-r px-2 py-2"
-                              >
-                                Action
-                              </div>
-                            </div>
-                      
-                            {/* Grid */}
-                            <div style={{ minHeight: 200 }}>
-                              <AutoSizer disableWidth>
-                                {({ height }) => (
-                                  <Grid
-                                    ref={gridRef}
-                                    columnCount={columns.length + 1}
-                                    rowCount={rows.length}
-                                    columnWidth={getColumnwidth}
-                                    rowHeight={getRowHeight}
-                                    width={gridTotalWidth}
-                                    height={height}
-                                    style={{ scrollbarWidth: 'none' }}
-                                  >
-                                    {({ columnIndex, rowIndex, style }) => {
-                                      const isActionCol = columnIndex === columns.length;
-                                      const colKey = columns[columnIndex];
-                                      return (
-                                        <div
-                                          key={`${rowIndex}-${columnIndex}`}
-                                          style={{
-                                            ...style,
-                                            padding: '0.5rem',
-                                            borderRight: '1px solid #eee',
-                                            borderBottom: '1px solid #eee',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'space-between',
-                                          }}
-                                        >
-                                          {isActionCol ? (
-                                            <Button
-                                              variant="ghost"
-                                              className="text-red-500 hover:text-red-700 p-1"
-                                              onClick={() => deleteRow(rowIndex)}
-                                            >
-                                              <Trash2 size={16} />
-                                            </Button>
-                                          ) : (
-                                            <Input
-                                              value={rows[rowIndex]?.[colKey] ?? ''}
-                                              onChange={(e) => updateCell(rowIndex, colKey, e.target.value)}
-                                              className="w-full h-full"
-                                            />
-                                          )}
-                                        </div>
-                                      );
-                                    }}
-                                  </Grid>
-                                )}
-                              </AutoSizer>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                ) :
-                (
-                    <></>
-                )}
-
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleFileClick}
+            className="bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border-purple-500/40 flex items-center gap-1.5"
+          >
+            <Upload className="w-4 h-4 text-purple-400" /> Bulk Upload Excel
+          </Button>
         </div>
-    )
-}
 
-export default RowColumnCreator
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleCreateEventSubmit}
+            disabled={createEventMutation.isPending}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 shadow-md shadow-emerald-900/30"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            {createEventMutation.isPending ? 'Submitting Event...' : 'Submit Event'}
+          </Button>
 
-{/*<div className='max-w-[1200px] border-none flex flex-col gap-2 mt-4 overflow-scroll'
-                style={columns.length === 0 ? {} : { minHeight: 300 }}>
-                <div className="flex w-full">
-                    {columns.map((col, index) => (
-                        <div
-                            key={index}
-                            style={{ width: columnWidths[index], minWidth: columnWidths[index] }}
-                            className="flex items-center justify-between px-2 py-2 border-r bg-gray-100"
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => resetStore()}
+            className="text-gray-400 hover:text-red-400 hover:bg-gray-800 flex items-center gap-1.5"
+          >
+            <RotateCcw className="w-4 h-4" /> Reset Form
+          </Button>
+        </div>
+      </div>
+
+      {/* Dynamic Item Table (Full Width 100%, Responsive Overflow Scroll) */}
+      {columns.length > 0 ? (
+        <div className="w-full overflow-hidden rounded-xl border border-gray-700 bg-gray-900 shadow-2xl">
+          <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-gray-700">
+            <table className="w-full text-left border-collapse min-w-full">
+              {/* Header */}
+              <thead>
+                <tr className="bg-gray-800/90 text-gray-200 border-b border-gray-700 text-xs font-semibold uppercase tracking-wider">
+                  <th className="px-4 py-3 border-r border-gray-700 w-16 text-center">#</th>
+                  {columns.map((col, idx) => (
+                    <th key={idx} className="px-4 py-3 border-r border-gray-700 min-w-[180px]">
+                      <div className="flex items-center justify-between gap-2">
+                        <input
+                          type="text"
+                          value={col}
+                          onChange={(e) => updateColumnName(idx, e.target.value)}
+                          className="bg-transparent text-gray-200 font-bold focus:outline-none focus:bg-gray-700/50 px-1 py-0.5 rounded w-full"
+                          title="Click to rename column"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => deleteColumn(idx)}
+                          className="text-gray-400 hover:text-red-400 transition-colors p-1 rounded hover:bg-gray-700/50"
+                          title="Delete column"
                         >
-                            <span>{col}</span>
-                            <Button
-                                onClick={() => deleteColumn(index)}
-                                className="p-1 bg-transparent hover:text-red-500 text-black"
-                            >
-                                <Trash2 size={16} />
-                            </Button>
-                        </div>
-                    ))}
-                    <div
-                        style={{ width: columnWidths[columns.length], minWidth: columnWidths[columns.length] }}
-                        className="bg-gray-100 flex items-center justify-center border-r px-2 py-2"
-                    >
-                        Action
-                    </div>
-                </div>
-                <AutoSizer>
-                    {({ height, width }) => {
-                        console.log('AutoSizer dimensions:', { height, width });
-                        return (
-                            <Grid
-                                ref={gridRef}
-                                columnCount={columns.length + 1} // +1 for the Action column
-                                rowCount={rows.length}
-                                columnWidth={getColumnwidth}
-                                rowHeight={getRowHeight}
-                                width={width}
-                                height={height}
-                            >
-                                {({ columnIndex, rowIndex, style }) => {
-                                    const isActionCol = columnIndex === columns.length;
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </th>
+                  ))}
+                  <th className="px-4 py-3 text-center w-20">Action</th>
+                </tr>
+              </thead>
 
-                                    if (isActionCol) {
-                                        return (
-                                            <div
-                                                key={`action-${rowIndex}`}
-                                                style={{
-                                                    ...style,
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    borderBottom: '1px solid #eee',
-                                                    borderRight: '1px solid #eee',
-                                                }}
-                                            >
-                                                <Button
-                                                    variant="ghost"
-                                                    className="text-red-500 hover:text-red-700 p-1"
-                                                    onClick={() => deleteRow(rowIndex)}
-                                                >
-                                                    <Trash2 size={16} />
-                                                </Button>
-                                            </div>
-                                        );
-                                    }
+              {/* Rows */}
+              <tbody className="divide-y divide-gray-800 text-sm">
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={columns.length + 2} className="px-4 py-8 text-center text-gray-400">
+                      No items added yet. Click <strong>Add Row</strong> or <strong>Bulk Upload Excel</strong>.
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((row, rowIndex) => (
+                    <tr key={rowIndex} className="hover:bg-gray-800/40 transition-colors">
+                      <td className="px-4 py-2 text-center text-gray-400 font-mono text-xs border-r border-gray-800">
+                        {rowIndex + 1}
+                      </td>
 
-                                    const colKey = columns[columnIndex];
-                                    return (
-                                        <div
-                                            key={`${rowIndex}-${columnIndex}`}
-                                            style={{
-                                                ...style,
-                                                padding: '0.5rem',
-                                                borderRight: '1px solid #eee',
-                                                borderBottom: '1px solid #eee',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'space-between',
-                                            }}
-                                        >
-                                            <Input
-                                                value={rows[rowIndex]?.[colKey] ?? ''}
-                                                onChange={(e) => updateCell(rowIndex, colKey, e.target.value)}
-                                                className="w-full h-full"
-                                            />
-                                        </div>
-                                    );
-                                }}
-                            </Grid>
-                        )
-                    }}
-                </AutoSizer>
-            </div> */}
+                      {columns.map((colKey, colIndex) => (
+                        <td key={colIndex} className="px-3 py-2 border-r border-gray-800">
+                          <Input
+                            type="text"
+                            value={row[colKey] ?? ''}
+                            onChange={(e) => updateCell(rowIndex, colKey, e.target.value)}
+                            placeholder={`Enter ${colKey}`}
+                            className="bg-gray-950/80 border-gray-700 text-gray-100 h-9 text-xs focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-full"
+                          />
+                        </td>
+                      ))}
 
-{/*
-    {rows?.map((row, rowId) => (
-                            <TableRow key={rowId} className='flex items-center gap-4'>
-                                {columns.map((col, idx) => (
-                                    <TableCell key={idx}>
-                                        <Input
-                                            type='text'
-                                            value={row[col] ?? ''}
-                                            onChange={(e) => updateCell(rowId, col, e.target.value)}
-                                            className='w-full px-2 py-1'
-                                        />
-                                    </TableCell>
-                                ))}
-                                <TableCell>
-                                    <Button onClick={() => deleteRow(rowId)}
-                                        className='px-2 py-2 shadow-none border-collapse bg-transparent hover:text-red-500 text-white'>
-                                        <Trash2 size={16}  />
-                                    </Button>
-                                </TableCell>
-                            </TableRow>
-                        ))}
-    */}
+                      <td className="px-4 py-2 text-center">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteRow(rowIndex)}
+                          className="text-gray-400 hover:text-red-400 hover:bg-red-500/10 h-8 w-8"
+                          title="Delete row"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center p-12 rounded-xl border border-dashed border-gray-700 bg-gray-900/40 text-center w-full">
+          <FileSpreadsheet className="w-12 h-12 text-gray-500 mb-3" />
+          <h4 className="text-lg font-bold text-gray-200 mb-1">No Columns or Items Added</h4>
+          <p className="text-sm text-gray-400 max-w-md mb-5">
+            Start by adding custom product columns or upload your product catalog directly from an Excel sheet.
+          </p>
+          <div className="flex items-center gap-3">
+            <Button type="button" size="sm" onClick={addColumn} className="bg-blue-600 hover:bg-blue-500 text-white">
+              <Plus className="w-4 h-4 mr-1" /> Add Column
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={handleFileClick} className="border-purple-500/40 text-purple-300 hover:bg-purple-600/20">
+              <Upload className="w-4 h-4 mr-1" /> Upload Excel
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
-
-//    <div
-//    className="w-full flex-1 relative"
-//    style={{
-//      display: 'flex',
-//      justifyContent: 'center', // center content in wide viewports
-//    }}
-//        //className="w-full"
-//     //   style={{
-//     //       display: 'flex',
-//     //       justifyContent: 'center', // center content in wide viewports
-//     //   }}
-//    //style={columns.length === 0 ?
-//    //    {} :
-//    //    {
-//    //        overflowX: 'scroll',
-//    //        scrollbarWidth: 'none',
-//    //        width: `${gridTotalWidth}px`, // fixed width for the grid
-//    //        minWidth: '250px', // ensures minimum full width
-//    //        maxWidth: 1200,
-//    //        overflowY: 'hidden',
-//    //        border: '1px solid white',
-//    //        borderRadius: '12px',
-//    //        display: 'flex',
-//    //        flexDirection: 'column',
-//    //        marginTop: '1rem',
-//    //        gap: '0.5rem',
-//    //        padding: 0
-//    //    }}
-//    >
-//        <div className='flex-1'
-//            style={{
-//                //maxWidth:'1200px',
-//                display:'flex',
-//                //minWidth: '250px',
-//                width:'100%',
-//                overflowX: 'auto', // allow horizontal scroll on small devices
-//                border: '1px solid #e5e7eb',
-//                borderRadius: '8px',
-//            }}
-//            >
-//            <div
-//                style={{
-//                    width: `100%`, // computed from columns
-//                    minWidth: '100%', // ensure it fills container at minimum
-//                }}
-//            >
-//                <div className="flex">
-//                    {columns.map((col, index) => (
-//                        <div
-//                            key={index}
-//                            style={{ width: columnWidths[index], minWidth: columnWidths[index] }}
-//                            className="flex items-center justify-between px-2 py-2 border-r bg-gray-100 text-base text-black font-medium"
-//                        >
-//                            <span>{col}</span>
-//                            <Button
-//                                onClick={() => deleteColumn(index)}
-//                                className="p-1 bg-transparent hover:text-red-500 text-black"
-//                            >
-//                                <Trash2 size={16} />
-//                            </Button>
-//                        </div>
-//                    ))}
-//                    {columns.length === 0 ? (
-//                        <></>
-//                    ) : (
-//                        <div
-//                            style={{ width: columnWidths[columns.length], minWidth: columnWidths[columns.length] }}
-//                            className="bg-gray-100 flex items-center justify-center border-r px-2 py-2"
-//                        >
-//                            Action
-//                        </div>
-//                    )}
-//                </div>
-//                <div style={{ minHeight: 200 }}>
-//                    <AutoSizer disableWidth>
-//                        {({ height }) => (
-//
-//                            <Grid
-//                                ref={gridRef}
-//                                columnCount={columns.length + 1}
-//                                rowCount={rows.length}
-//                                columnWidth={getColumnwidth}
-//                                rowHeight={getRowHeight}
-//                                width={gridTotalWidth}
-//                                height={height}
-//                                style={{ scrollbarWidth: 'none' }}
-//                            >
-//                                {({ columnIndex, rowIndex, style }) => {
-//                                    const isActionCol = columnIndex === columns.length;
-//                                    const colKey = columns[columnIndex];
-//                                    return (
-//                                        <div
-//                                            key={`${rowIndex}-${columnIndex}`}
-//                                            style={{
-//                                                ...style,
-//                                                padding: '0.5rem',
-//                                                borderRight: '1px solid #eee',
-//                                                borderBottom: '1px solid #eee',
-//                                                display: 'flex',
-//                                                alignItems: 'center',
-//                                                justifyContent: 'space-between',
-//
-//                                            }}
-//                                        >
-//                                            {isActionCol ? (
-//                                                <Button
-//                                                    variant="ghost"
-//                                                    className="text-red-500 hover:text-red-700 p-1"
-//                                                    onClick={() => deleteRow(rowIndex)}
-//                                                >
-//                                                    <Trash2 size={16} />
-//                                                </Button>
-//                                            ) : (
-//                                                <Input
-//                                                    value={rows[rowIndex]?.[colKey] ?? ''}
-//                                                    onChange={(e) => updateCell(rowIndex, colKey, e.target.value)}
-//                                                    className="w-full h-full text-white font-normal text-[14px]"
-//                                                />
-//                                            )}
-//                                        </div>
-//                                    );
-//                                }}
-//                            </Grid>
-//                        )}
-//                    </AutoSizer>
-//                </div>
-//            </div>
-//        </div>
-//    </div>
+export default RowColumnCreator;

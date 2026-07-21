@@ -1,46 +1,60 @@
-import mongoose, { Document } from "mongoose";
 import { Request } from "express";
 
-export interface IUser extends Document{
-    name:string;
-    email:string;
-    password:string;
-    registrationTime:string;
-};
+export interface IUser {
+  id: string;
+  name: string;
+  email: string;
+  password_hash: string;
+  registration_time: string;
+  created_at: Date;
+}
 
-export interface Aucevent extends Document{
-    eventName: string;
-    startTime: Date;
-    endTime: Date;
-    eventDate : Date;
-    description?: string;
-    items: mongoose.Types.ObjectId[];
-    createdBy: mongoose.Types.ObjectId;
-    eventStatus: 'upcoming' | 'active' | 'ended';
-    columns: string[];
-};
+export interface Aucevent {
+  id: string;
+  name: string;
+  description?: string;
+  start_time: Date;
+  end_time: Date;
+  event_date: Date;
+  creator_id: string;
+  event_status: 'upcoming' | 'active' | 'ended';
+  columns: string[];
+  created_at: Date;
+}
 
-export interface IItems extends Document{
-    eventId: mongoose.Types.ObjectId;
-    columnData: Map<string, any>;
-    createdBy: mongoose.Types.ObjectId;
-};
+export interface IItems {
+  id: string;
+  event_id: string;
+  column_data: Record<string, any>;
+  created_by?: string;
+  created_at: Date;
+}
 
-export interface DecodeToken{
-    userId: string;
-    email: string;
-    name: string;
-};
+export interface DecodeToken {
+  userId: string;
+  email: string;
+  name: string;
+}
 
-export interface AuthenticationRequest extends Request{
-    user?: DecodeToken
-};
+export interface AuthenticationRequest extends Request {
+  user?: DecodeToken;
+}
 
-  
-export interface IBid extends Document {
-    event: mongoose.Types.ObjectId;
-    user: mongoose.Types.ObjectId;
-    item:mongoose.Types.ObjectId;
-    amount:number;
-    rank:number;
+export interface IBid {
+  id: string;
+  event_id: string;
+  user_id: string;
+  item_id: string;
+  amount: number;
+  rank: number;
+  created_at: Date;
+}
+
+export interface IEntireEvent {
+  id: string;
+  event_id: string;
+  event_details: any;
+  items: any[];
+  bids: any[];
+  created_at: Date;
 }

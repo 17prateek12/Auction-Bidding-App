@@ -1,33 +1,36 @@
 import dotenv from 'dotenv';
-import { connectionDb } from './connection/dbConfig';
+import { initPostgresDb } from './connection/postgresConfig';
 import { errorHandler, notFound } from './middleware/errorMiddleware';
 import app from './app/app';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { eventSockethandler } from './sockets/eventSocket';
+import { bidSocketHandler } from './sockets/bidSocket';
+import { initBidWorker } from './workers/bidWorker';
 
+dotenv.config();
+initPostgresDb();
+initBidWorker();
 
-dotenv.config()
-connectionDb();
 const httpServer = createServer(app);
 
-const io = new Server(httpServer,{
-    cors:{
-        origin:'*',
-        methods:['GET','POST']
-    }
+const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
 });
 
-io.on('connection',(socket)=>{
-    console.log('Socket connected',socket.id);
-    eventSockethandler(socket);
-})
+io.on('connection', (socket) => {
+  console.log('Socket connected:', socket.id);
+  eventSockethandler(socket);
+  bidSocketHandler(io, socket);
+});
 
 const PORT = process.env.PORT || 5000;
 app.use(notFound);
 app.use(errorHandler);
 
 httpServer.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+  console.log(`Server running at http://localhost:${PORT}`);
 });
-
