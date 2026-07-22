@@ -27,7 +27,7 @@ io.on('connection', (socket) => {
   bidSocketHandler(io, socket);
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT;
 app.use(notFound);
 app.use(errorHandler);
 

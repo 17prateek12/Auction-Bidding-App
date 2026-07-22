@@ -107,9 +107,18 @@ export const getEventsByUserService = async (userId: string) => {
     throw new ApiError(400, 'User ID is required');
   }
 
-  // Auto-transition ended events for this user
+  // Auto-transition upcoming events to active when their start_time is reached
   await pool.query(
-    `UPDATE events SET event_status = 'ended' WHERE event_status = 'active' AND end_time <= NOW()`
+    `UPDATE events 
+     SET event_status = 'active' 
+     WHERE event_status = 'upcoming' AND start_time <= NOW() AND end_time > NOW()`
+  );
+
+  // Auto-transition active/upcoming events to ended when their end_time has passed
+  await pool.query(
+    `UPDATE events 
+     SET event_status = 'ended' 
+     WHERE event_status IN ('active', 'upcoming') AND end_time <= NOW()`
   );
 
   const userEventsRes = await pool.query(

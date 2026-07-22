@@ -26,30 +26,53 @@ const AllEventsDashboard = () => {
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Extract events array from response
+  // Extract events array and compute client-side status dynamically to avoid clock sync drift
   const eventsList = useMemo(() => {
-    if (!rawData) return [];
-    if (Array.isArray(rawData)) return rawData;
-    if (rawData.upcoming || rawData.active || rawData.ended) {
-      const all: any[] = [];
-      if (rawData.active?.event) all.push(...rawData.active.event);
-      if (rawData.upcoming?.event) all.push(...rawData.upcoming.event);
-      if (rawData.ended?.event) all.push(...rawData.ended.event);
-      return all;
+    let list: any[] = [];
+    if (rawData) {
+      if (Array.isArray(rawData)) {
+        list = rawData;
+      } else if (rawData.upcoming || rawData.active || rawData.ended) {
+        if (rawData.active?.event) list.push(...rawData.active.event);
+        if (rawData.upcoming?.event) list.push(...rawData.upcoming.event);
+        if (rawData.ended?.event) list.push(...rawData.ended.event);
+      }
     }
-    return [];
+
+    const now = new Date();
+    return list.map((e) => {
+      const startTimeRaw = e.start_time || e.startTime;
+      const endTimeRaw = e.end_time || e.endTime;
+      const rawStatus = e.event_status || e.eventStatus || 'upcoming';
+
+      const startTime = startTimeRaw ? new Date(startTimeRaw) : null;
+      const endTime = endTimeRaw ? new Date(endTimeRaw) : null;
+
+      let status = rawStatus;
+
+      if (endTime && now >= endTime) {
+        status = 'ended';
+      } else if (startTime && endTime && now >= startTime && now < endTime) {
+        status = 'active';
+      }
+
+      return {
+        ...e,
+        event_status: status,
+      };
+    });
   }, [rawData]);
 
   // Compute counts for status badges
   const counts = useMemo(() => {
     const activeCount = eventsList.filter(
-      (e) => (e.event_status || e.eventStatus) === 'active'
+      (e) => e.event_status === 'active'
     ).length;
     const upcomingCount = eventsList.filter(
-      (e) => (e.event_status || e.eventStatus) === 'upcoming'
+      (e) => e.event_status === 'upcoming'
     ).length;
     const endedCount = eventsList.filter(
-      (e) => (e.event_status || e.eventStatus) === 'ended'
+      (e) => e.event_status === 'ended'
     ).length;
     return { activeCount, upcomingCount, endedCount };
   }, [eventsList]);
@@ -57,10 +80,7 @@ const AllEventsDashboard = () => {
   // Filtered Events based on Checkboxes & Search Query
   const filteredEvents = useMemo(() => {
     return eventsList.filter((event) => {
-      const status = (event.event_status || event.eventStatus || 'upcoming') as
-        | 'active'
-        | 'upcoming'
-        | 'ended';
+      const status = event.event_status as 'active' | 'upcoming' | 'ended';
 
       const matchesStatus =
         (status === 'active' && selectedStatuses.active) ||
@@ -83,7 +103,7 @@ const AllEventsDashboard = () => {
 
   if (!mounted || isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[300px]">
+      <div className="flex items-center justify-center min-h-[400px]">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
       </div>
     );
@@ -91,101 +111,91 @@ const AllEventsDashboard = () => {
 
   if (isError) {
     return (
-      <div className="text-center py-10 text-red-400">
-        Failed to load events. Please check your network connection.
+      <div className="text-center py-20 text-red-400">
+        Failed to load sourcing events dashboard.
       </div>
     );
   }
 
   return (
-    <div className="w-full space-y-6">
-      {/* HackerRank-style Filter Bar */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4 p-4 rounded-xl border border-gray-700 bg-gray-900/80 backdrop-blur-md">
-        {/* Status Checkboxes using Shadcn Button */}
-        <div className="flex items-center gap-3 flex-wrap w-full md:w-auto">
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mr-2">
-            <Filter className="w-4 h-4 text-blue-400" /> Filter Status:
+    <div className="w-full flex flex-col gap-6 mt-4">
+      {/* 1. Header Title */}
+      <div>
+        <h1 className="text-3xl font-extrabold tracking-tight text-white">Sourcing Events Dashboard</h1>
+        <p className="text-sm text-gray-400 mt-1">
+          Explore, participate, or monitor live reverse auction bidding events.
+        </p>
+      </div>
+
+      {/* 2. Search & Filter Bar */}
+      <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-gray-900/60 p-4 rounded-xl border border-gray-800">
+        {/* Search */}
+        <div className="relative w-full md:max-w-md">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+          <input
+            type="text"
+            placeholder="Search events by name..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full h-11 pl-11 pr-4 bg-gray-950 border border-gray-800 rounded-lg text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+          />
+        </div>
+
+        {/* Filter Toggle Badges */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs text-gray-500 mr-2 flex items-center gap-1.5">
+            <Filter className="w-3.5 h-3.5" /> Filter Status:
           </span>
 
-          {/* Live Checkbox */}
           <Button
-            type="button"
-            size="sm"
-            variant={selectedStatuses.active ? 'default' : 'outline'}
+            variant="ghost"
             onClick={() => toggleStatus('active')}
-            className={`flex items-center gap-2 transition-all ${
+            className={`h-9 px-4 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
               selectedStatuses.active
-                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30'
-                : 'bg-gray-800 text-gray-400 border-gray-700 opacity-60 hover:opacity-100'
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                : 'bg-gray-950 text-gray-500 border border-gray-850 hover:bg-gray-900'
             }`}
           >
             <Activity className="w-3.5 h-3.5" />
-            Live Bidding
-            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/30 text-emerald-200">
-              {counts.activeCount}
-            </span>
+            Live ({counts.activeCount})
           </Button>
 
-          {/* Upcoming Checkbox */}
           <Button
-            type="button"
-            size="sm"
-            variant={selectedStatuses.upcoming ? 'default' : 'outline'}
+            variant="ghost"
             onClick={() => toggleStatus('upcoming')}
-            className={`flex items-center gap-2 transition-all ${
+            className={`h-9 px-4 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
               selectedStatuses.upcoming
-                ? 'bg-blue-500/20 text-blue-300 border-blue-500/50 hover:bg-blue-500/30'
-                : 'bg-gray-800 text-gray-400 border-gray-700 opacity-60 hover:opacity-100'
+                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
+                : 'bg-gray-950 text-gray-500 border border-gray-850 hover:bg-gray-900'
             }`}
           >
             <Clock className="w-3.5 h-3.5" />
-            Upcoming
-            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-blue-500/30 text-blue-200">
-              {counts.upcomingCount}
-            </span>
+            Upcoming ({counts.upcomingCount})
           </Button>
 
-          {/* Past / Ended Checkbox */}
           <Button
-            type="button"
-            size="sm"
-            variant={selectedStatuses.ended ? 'secondary' : 'outline'}
+            variant="ghost"
             onClick={() => toggleStatus('ended')}
-            className={`flex items-center gap-2 transition-all ${
+            className={`h-9 px-4 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
               selectedStatuses.ended
-                ? 'bg-gray-700 text-gray-200 border-gray-500 hover:bg-gray-600'
-                : 'bg-gray-800 text-gray-400 border-gray-700 opacity-60 hover:opacity-100'
+                ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+                : 'bg-gray-950 text-gray-500 border border-gray-850 hover:bg-gray-900'
             }`}
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
-            Ended / Past
-            <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-gray-600 text-gray-300">
-              {counts.endedCount}
-            </span>
+            Ended ({counts.endedCount})
           </Button>
-        </div>
-
-        {/* Search Bar */}
-        <div className="relative w-full md:w-64">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search events..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-1.5 text-xs bg-gray-800 text-gray-100 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500 transition-colors placeholder:text-gray-500"
-          />
         </div>
       </div>
 
-      {/* Grid of Event Cards */}
+      {/* 3. Grid List */}
       {filteredEvents.length === 0 ? (
-        <div className="text-center py-16 text-gray-400 bg-gray-900/30 rounded-xl border border-gray-800">
-          <p className="text-base font-medium">No events found matching your active filters.</p>
+        <div className="text-center py-20 text-gray-500 border border-dashed border-gray-800 rounded-2xl bg-gray-900/10">
+          No events match the selected filters or search query.
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-          {filteredEvents.map((event: any) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredEvents.map((event) => (
             <EventCard key={event.id || event._id} event={event} />
           ))}
         </div>

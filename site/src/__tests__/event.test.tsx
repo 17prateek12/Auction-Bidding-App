@@ -4,36 +4,50 @@ import '@testing-library/jest-dom';
 import EventCard from '../components/reusable-components/event-card';
 
 describe('Frontend Event Component Tests', () => {
+  const now = new Date();
+
+  // Dynamic active mock times (Starts 1 hour ago, ends 1 hour from now)
+  const activeStart = new Date(now.getTime() - 60 * 60 * 1000);
+  const activeEnd = new Date(now.getTime() + 60 * 60 * 1000);
+
   const sampleActiveEvent = {
     id: 'test-event-101',
     name: 'Live Electronics Auction',
     description: 'Reverse auction event for mobile laptops and smartphones',
     event_status: 'active',
-    event_date: '2026-07-21T10:00:00.000Z',
-    start_time: '2026-07-21T10:00:00.000Z',
-    end_time: '2026-07-21T14:00:00.000Z',
+    event_date: activeStart.toISOString(),
+    start_time: activeStart.toISOString(),
+    end_time: activeEnd.toISOString(),
     creator_id: 'user-xyz',
   };
+
+  // Dynamic upcoming mock times (Starts 1 hour from now, ends 2 hours from now)
+  const upcomingStart = new Date(now.getTime() + 60 * 60 * 1000);
+  const upcomingEnd = new Date(now.getTime() + 120 * 60 * 1000);
 
   const sampleUpcomingEvent = {
     id: 'test-event-102',
     name: 'Upcoming Machinery Fleet',
     description: 'Upcoming sourcing auction for heavy excavators',
     event_status: 'upcoming',
-    event_date: '2026-07-25T09:00:00.000Z',
-    start_time: '2026-07-25T09:00:00.000Z',
-    end_time: '2026-07-25T12:00:00.000Z',
+    event_date: upcomingStart.toISOString(),
+    start_time: upcomingStart.toISOString(),
+    end_time: upcomingEnd.toISOString(),
     creator_id: 'user-xyz',
   };
+
+  // Dynamic ended mock times (Starts 2 hours ago, ended 1 hour ago)
+  const endedStart = new Date(now.getTime() - 120 * 60 * 1000);
+  const endedEnd = new Date(now.getTime() - 60 * 60 * 1000);
 
   const sampleEndedEvent = {
     id: 'test-event-103',
     name: 'Ended Freight Route Contract',
     description: 'Finalized contract for logistics routes',
     event_status: 'ended',
-    event_date: '2026-07-15T08:00:00.000Z',
-    start_time: '2026-07-15T08:00:00.000Z',
-    end_time: '2026-07-15T12:00:00.000Z',
+    event_date: endedStart.toISOString(),
+    start_time: endedStart.toISOString(),
+    end_time: endedEnd.toISOString(),
     creator_id: 'user-xyz',
   };
 

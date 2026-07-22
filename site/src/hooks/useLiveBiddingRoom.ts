@@ -113,14 +113,14 @@ export const useLiveBiddingRoom = (eventId: string) => {
     return null;
   }, []);
 
-  // HTTP Polling Fallback (fetches latest user ranks & item leaderboards every 3s)
+  // HTTP Polling Fallback (fetches latest user ranks & item leaderboards in bulk)
   const pollLeaderboardsAndRanks = useCallback(async () => {
-    if (!eventId || items.length === 0) return;
+    if (!eventId) return;
     try {
       const token = Cookies.get('token') || Cookies.get('accessToken');
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-      // 1. Poll User Rank Fallback
+      // 1. Poll User Rank Fallback (Single fast indexed query)
       if (token) {
         const userRankRes = await axios.get(`${API_URL}/api/bid/user-rank?eventId=${eventId}`, { headers });
         if (userRankRes.data?.userBids && Array.isArray(userRankRes.data.userBids)) {
@@ -137,22 +137,22 @@ export const useLiveBiddingRoom = (eventId: string) => {
         }
       }
 
-      // 2. Poll Leaderboard Fallback for items
-      const newLeaderboards: Record<string, any[]> = {};
-      for (const item of items) {
-        const itemId = item.id || item._id;
-        const lbRes = await axios.get(`${API_URL}/api/bid/leaderboard?eventId=${eventId}&itemId=${itemId}`, { headers });
-        if (lbRes.data?.rankedData && Array.isArray(lbRes.data.rankedData)) {
-          newLeaderboards[itemId] = lbRes.data.rankedData;
-        }
-      }
-      if (Object.keys(newLeaderboards).length > 0) {
-        setLeaderboards((prev) => ({ ...prev, ...newLeaderboards }));
+      // 2. Poll Leaderboard in Bulk (Single fast query instead of 10,000 separate HTTP calls!)
+      const lbRes = await axios.get(`${API_URL}/api/bid/leaderboard?eventId=${eventId}`, { headers });
+      if (lbRes.data?.leaderboards) {
+        setLeaderboards(lbRes.data.leaderboards);
       }
     } catch (err) {
       // Silent catch for HTTP polling fallback
     }
-  }, [eventId, items]);
+  }, [eventId]);
+
+  // Trigger initial rankings fetch immediately once items are loaded
+  useEffect(() => {
+    if (items.length > 0) {
+      pollLeaderboardsAndRanks();
+    }
+  }, [items.length, pollLeaderboardsAndRanks]);
 
   // Periodic HTTP Polling Fallback (every 3 seconds)
   useEffect(() => {
@@ -161,7 +161,7 @@ export const useLiveBiddingRoom = (eventId: string) => {
       pollLeaderboardsAndRanks();
     }, 3000);
     return () => clearInterval(interval);
-  }, [eventId, items, pollLeaderboardsAndRanks]);
+  }, [eventId, items.length, pollLeaderboardsAndRanks]);
 
   // Real-Time Socket Connection & Broadcast Listeners
   useEffect(() => {
@@ -220,73 +220,39 @@ export const useLiveBiddingRoom = (eventId: string) => {
       }
     };
 
-    const handleBidError = (data: any) => {
-      toast.error(data.message || 'Failed to place bid.');
-      setSubmittingItemId(null);
+    const handleEventEnded = () => {
+      setIsEventEnded(true);
+      toast.info('🔒 Event has ended. Bidding closed!');
     };
 
     socket.on('updateLeaderboardAll', handleUpdateLeaderboardAll);
     socket.on('updateLeaderboard', handleUpdateLeaderboard);
     socket.on('bid:success', handleBidSuccess);
-    socket.on('bid:error', handleBidError);
+    socket.on('event:ended', handleEventEnded);
 
     return () => {
       socket.off('updateLeaderboardAll', handleUpdateLeaderboardAll);
       socket.off('updateLeaderboard', handleUpdateLeaderboard);
       socket.off('bid:success', handleBidSuccess);
-      socket.off('bid:error', handleBidError);
+      socket.off('event:ended', handleEventEnded);
     };
   }, [eventId, currentUserId, extractUserBid]);
 
-  // Direct Bid Placement Call
+  // Action: Place Bid via WebSocket
   const placeBid = useCallback(
-    async (itemId: string, amount: number) => {
+    (itemId: string, amount: number) => {
       if (isEventEnded) {
-        toast.error('Bidding is closed because the event has ended.');
+        toast.error('Bidding is closed for this event.');
         return;
       }
-      if (!eventId || !itemId || isNaN(amount) || amount <= 0) {
-        return;
-      }
-
       setSubmittingItemId(itemId);
-
-      try {
-        const socket = getSocket();
-        if (socket && socket.connected) {
-          placeBidSocket(eventId, itemId, amount);
-        } else {
-          // REST Fallback if socket is disconnected
-          const token = Cookies.get('token') || Cookies.get('accessToken');
-          const res = await axios.post(
-            `${API_URL}/api/bid/place`,
-            { eventId, itemId, amount },
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-
-          toast.success(`🎉 Bid placed! (Rank #${res.data.rank})`);
-          if (res.data.rank && res.data.amount) {
-            setUserBids((prev) => ({
-              ...prev,
-              [itemId]: {
-                amount: parseFloat(res.data.amount),
-                rank: parseInt(res.data.rank, 10),
-              },
-            }));
-          }
-        }
-      } catch (err: any) {
-        toast.error(err?.response?.data?.message || 'Failed to place bid.');
-      } finally {
-        setSubmittingItemId(null);
-      }
+      placeBidSocket(eventId, itemId, amount);
     },
     [eventId, isEventEnded]
   );
 
   return {
     eventData: eventDetails,
-    eventDetails,
     columns,
     items,
     isLoading,
@@ -294,8 +260,7 @@ export const useLiveBiddingRoom = (eventId: string) => {
     isEventEnded,
     leaderboards,
     userBids,
-    submittingItemId,
     placeBid,
-    refetch: fetchEventItems,
+    submittingItemId,
   };
 };

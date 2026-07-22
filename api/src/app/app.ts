@@ -11,7 +11,9 @@ dotenv.config();
 
 const app = express();
 
-app.use(express.json());
+// Increase request payload size limit for uploading large Excel datasets (e.g., 10,000+ rows)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors());
 
 app.get('/', (req, res) => {

@@ -5,11 +5,25 @@ import { placeBidService, getLeaderboardService, maskLeaderboardForViewer } from
 import { pool } from '../connection/postgresConfig';
 import { ApiError } from '../utils/ApiError';
 
+// Module-level cache for Socket.io server instance
+let ioInstance: Server | null = null;
+
+export const setIoInstance = (io: Server) => {
+  ioInstance = io;
+};
+
+export const getSocket = (): Server | null => {
+  return ioInstance;
+};
+
 // Throttling timer map for WebSocket room broadcasts (200ms batching window)
 const broadcastTimers: Record<string, NodeJS.Timeout> = {};
 const pendingLeaderboards: Record<string, { eventId: string; itemId: string; rankedData: any[] }> = {};
 
 export const bidSocketHandler = (io: Server, socket: Socket) => {
+  // Store the io instance globally
+  setIoInstance(io);
+
   // Subscribing to event room & sending role-filtered initial leaderboards
   socket.on('room:join', async ({ eventId }: { eventId: string }) => {
     if (eventId) {
@@ -104,7 +118,7 @@ export const bidSocketHandler = (io: Server, socket: Socket) => {
         pendingLeaderboards[throttleKey] = {
           eventId: result.eventId,
           itemId: result.itemId,
-          rankedData: result.rawLeaderboard || result.rankedData,
+          rankedData: result.rawLeaderboard,
         };
 
         if (!broadcastTimers[throttleKey]) {

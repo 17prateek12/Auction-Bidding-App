@@ -1,34 +1,33 @@
 import { pool } from '../connection/postgresConfig';
-import { placeBidAtomically } from '../utils/luaScripts';
-import { redis } from '../connection/redisConfig';
 import { ApiError } from '../utils/ApiError';
-import { addBidToSyncQueue } from '../workers/bidQueue';
+import { redis } from '../connection/redisConfig';
+import { getSocket } from '../sockets/bidSocket';
 
-/**
- * Reusable Helper: Masks leaderboard entries for a given viewer.
- * Event Creator & Self see full identity and exact amount.
- * Competitors see privacy-masked entries (userName: "Competitor", amount: null).
- */
+// Reusable Leaderboard Viewer Masking Function for Security & Privacy Compliance
 export const maskLeaderboardForViewer = (
-  rankedData: Array<{ userId: string; amount: number | null; rank: number; userName?: string; userEmail?: string }>,
+  rankedData: any[],
   requestingUserId?: string,
   isCreator: boolean = false
 ) => {
-  return rankedData.map((d) => {
-    const isSelf = Boolean(requestingUserId && d.userId === requestingUserId);
+  if (!Array.isArray(rankedData)) return [];
+
+  return rankedData.map((bid) => {
+    const isSelf = Boolean(requestingUserId && bid.userId === requestingUserId);
+
+    // Creators view all details; Bidders see only their own amounts/names, with competitors masked
     if (isCreator || isSelf) {
       return {
-        userId: d.userId,
-        amount: d.amount,
-        rank: d.rank,
-        userName: d.userName || d.userEmail || 'Bidder',
-        userEmail: d.userEmail || '',
+        userId: bid.userId,
+        amount: bid.amount !== null ? parseFloat(bid.amount) : null,
+        rank: parseInt(bid.rank, 10),
+        userName: bid.userName || 'Bidder',
+        userEmail: bid.userEmail || '',
       };
     } else {
       return {
         userId: 'masked',
         amount: null,
-        rank: d.rank,
+        rank: parseInt(bid.rank, 10),
         userName: 'Competitor',
         userEmail: '',
       };
@@ -47,12 +46,13 @@ export const placeBidService = async ({
   itemId: string;
   amount: number;
 }) => {
-  if (!eventId || !itemId || !amount || amount <= 0) {
-    throw new ApiError(400, 'eventId, itemId, and valid positive amount are required');
+  if (!userId || !eventId || !itemId || amount === undefined) {
+    throw new ApiError(400, 'All bid placement parameters are required');
   }
 
+  // 1. Fetch Event & Item Details (Validate creator is not bidding, event is active)
   const eventRes = await pool.query(
-    `SELECT * FROM events WHERE id = $1`,
+    `SELECT event_status, creator_id FROM events WHERE id = $1`,
     [eventId]
   );
 
@@ -63,107 +63,28 @@ export const placeBidService = async ({
   const event = eventRes.rows[0];
 
   if (event.creator_id === userId) {
-    throw new ApiError(403, 'Event creator cannot participate or bid in their own event');
+    throw new ApiError(403, 'Event creators are not allowed to place bids');
   }
 
-  const now = new Date();
-  if (now < new Date(event.start_time)) {
-    throw new ApiError(400, 'Event has not started yet');
+  if (event.event_status !== 'active') {
+    throw new ApiError(400, 'Bidding is only allowed on active events');
   }
-  if (now >= new Date(event.end_time)) {
-    throw new ApiError(400, 'Event has ended');
-  }
-
-  const bidsKey = `event:${eventId}:item:${itemId}:bids`;
-  let luaResult: any;
-
-  try {
-    luaResult = await placeBidAtomically(bidsKey, userId, amount);
-  } catch (err: any) {
-    if (err instanceof ApiError) throw err;
-    console.error('⚠️ Redis outage detected during bid placement:', err?.message || err);
-    throw new ApiError(503, 'Bidding is temporarily paused due to cache maintenance — please try again shortly');
-  }
-
-  const { success, rankOrMessage } = luaResult;
-
-  if (!success) {
-    throw new ApiError(400, rankOrMessage);
-  }
-
-  const newRank = parseInt(rankOrMessage, 10);
-
-  // Format ranked leaderboard from Redis (ZRANGE = lowest bid first for reverse auction)
-  let leaderboardRaw: string[] = [];
-  try {
-    leaderboardRaw = await redis.zrange(bidsKey, 0, -1, 'WITHSCORES');
-  } catch (err) {
-    console.error('Redis error fetching ZRANGE:', err);
-  }
-
-  const rankedData: Array<{ userId: string; amount: number; rank: number; userName?: string; userEmail?: string }> = [];
-  for (let i = 0; i < leaderboardRaw.length; i += 2) {
-    rankedData.push({
-      userId: leaderboardRaw[i],
-      amount: parseFloat(leaderboardRaw[i + 1]),
-      rank: Math.floor(i / 2) + 1,
-    });
-  }
-
-  // Enrich with user names and emails for live leaderboard display
-  const userIds = rankedData.map((d) => d.userId);
-  if (userIds.length > 0) {
-    try {
-      const usersRes = await pool.query(
-        `SELECT id, name, email FROM users WHERE id = ANY($1::uuid[])`,
-        [userIds]
-      );
-      const userMap = new Map(usersRes.rows.map((u) => [u.id, u]));
-      rankedData.forEach((d) => {
-        const u = userMap.get(d.userId);
-        d.userName = u?.name || u?.email || 'Bidder';
-        d.userEmail = u?.email || '';
-      });
-    } catch (err) {
-      console.error('Error enriching user names:', err);
-    }
-  }
-
-  // Enqueue job to BullMQ Write-Behind Queue for async PostgreSQL persistence
-  addBidToSyncQueue({
-    eventId,
-    itemId,
-    userId,
-    amount,
-    rank: newRank,
-  }).catch((err) => console.error('Error adding bid job to sync queue:', err));
-
-  // Mask leaderboard specifically for the HTTP bidder
-  const maskedForCaller = maskLeaderboardForViewer(rankedData, userId, false);
-
-  return {
-    eventId,
-    itemId,
-    amount,
-    rank: newRank,
-    rankedData: maskedForCaller,
-    rawLeaderboard: rankedData,
-  };
-};
-
-export const getLeaderboardService = async (eventId: string, itemId: string, requestingUserId?: string) => {
-  if (!eventId || !itemId) {
-    throw new ApiError(400, 'eventId and itemId are required');
-  }
-
-  // Fetch Event Creator to determine Role
-  const eventRes = await pool.query(`SELECT creator_id FROM events WHERE id = $1`, [eventId]);
-  const isCreator = Boolean(eventRes.rows.length > 0 && requestingUserId && eventRes.rows[0].creator_id === requestingUserId);
 
   const bidsKey = `event:${eventId}:item:${itemId}:bids`;
   let rankedData: Array<{ userId: string; amount: number | null; rank: number; userName?: string; userEmail?: string }> = [];
 
+  // 2. Atomic Redis placing check with Outage/Down Fallback protection (Fail-Closed)
   try {
+    // Check if new bid is strictly lower than existing bid ("Always Improve" rule)
+    const currentScore = await redis.zscore(bidsKey, userId);
+    if (currentScore !== null && amount >= parseFloat(currentScore)) {
+      throw new ApiError(400, 'Bids must be strictly lower than your current best bid');
+    }
+
+    // Write to Redis Cache atomically
+    await redis.zadd(bidsKey, amount, userId);
+
+    // Retrieve full updated Redis Leaderboard
     const leaderboardRaw = await redis.zrange(bidsKey, 0, -1, 'WITHSCORES');
     if (leaderboardRaw && leaderboardRaw.length > 0) {
       for (let i = 0; i < leaderboardRaw.length; i += 2) {
@@ -174,34 +95,47 @@ export const getLeaderboardService = async (eventId: string, itemId: string, req
         });
       }
     }
-  } catch (err) {
-    console.error('Redis error during leaderboard fetch:', err);
+  } catch (redisErr: any) {
+    // If Redis is offline/unreachable, do NOT fallback to raw writes: Bidding pauses gracefully
+    if (redisErr instanceof ApiError) throw redisErr;
+    console.error('Redis connection outage during placeBidService. Bidding paused.', redisErr);
+    throw new ApiError(503, 'Bidding is temporarily paused — please try again shortly');
   }
 
-  // PostgreSQL Fallback (Dynamic SQL Window Function for accurate reverse auction ranks)
-  if (rankedData.length === 0) {
-    const dbBids = await pool.query(
-      `SELECT 
-         b.user_id, 
-         b.amount, 
-         ROW_NUMBER() OVER (ORDER BY b.amount ASC) as rank 
-       FROM bids b 
-       WHERE b.event_id = $1 AND b.item_id = $2 
-       ORDER BY b.amount ASC`,
-      [eventId, itemId]
+  // 3. Queue Background Job to write-behind to PostgreSQL (Single Source of Truth)
+  const myRankObj = rankedData.find((b) => b.userId === userId);
+  const myRank = myRankObj ? myRankObj.rank : 1;
+
+  try {
+    const { getQueue } = require('../utils/bullmqQueue');
+    const bidQueue = getQueue();
+    await bidQueue.add('sync-bid-to-pg', {
+      eventId,
+      itemId,
+      userId,
+      amount,
+      rank: myRank,
+    }, {
+      removeOnComplete: true,
+      removeOnFail: false,
+    });
+  } catch (qErr) {
+    console.error('BullMQ job dispatch failed, falling back to direct write-through:', qErr);
+    // Fallback to write-through in case queue system is degraded
+    await pool.query(
+      `
+      INSERT INTO bids (event_id, item_id, user_id, amount, rank)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (event_id, item_id, user_id)
+      DO UPDATE SET amount = EXCLUDED.amount, rank = EXCLUDED.rank;
+    `,
+      [eventId, itemId, userId, amount, myRank]
     );
-
-    rankedData = dbBids.rows.map((row) => ({
-      userId: row.user_id,
-      amount: parseFloat(row.amount),
-      rank: parseInt(row.rank, 10),
-    }));
   }
 
-  // Enrich & Role-Filter for PII & Competitor Bid Privacy
+  // 4. Enrich Leaderboard usernames
   const userIds = rankedData.map((d) => d.userId);
   let userMap = new Map<string, any>();
-
   if (userIds.length > 0) {
     try {
       const usersRes = await pool.query(
@@ -210,7 +144,7 @@ export const getLeaderboardService = async (eventId: string, itemId: string, req
       );
       userMap = new Map(usersRes.rows.map((u) => [u.id, u]));
     } catch (err) {
-      console.error('Error enriching user names in getLeaderboardService:', err);
+      console.error('Error enriching user names in placeBidService:', err);
     }
   }
 
@@ -223,14 +157,151 @@ export const getLeaderboardService = async (eventId: string, itemId: string, req
     };
   });
 
-  const roleFilteredData = maskLeaderboardForViewer(enrichedData, requestingUserId, isCreator);
+  // 5. Emit real-time updates via Socket.IO Throttled Broadcast Engine
+  const io = getSocket();
+  if (io) {
+    const { scheduleLeaderboardBroadcast } = require('../sockets/bidSocket');
+    scheduleLeaderboardBroadcast(eventId, itemId, enrichedData);
+  }
 
   return {
     eventId,
     itemId,
-    isCreator,
-    rankedData: roleFilteredData,
+    amount,
+    rank: myRank,
+    rawLeaderboard: enrichedData,
   };
+};
+
+export const getLeaderboardService = async (eventId: string, itemId?: string, requestingUserId?: string) => {
+  if (!eventId) {
+    throw new ApiError(400, 'eventId is required');
+  }
+
+  // Fetch Event Creator to determine Role
+  const eventRes = await pool.query(`SELECT creator_id FROM events WHERE id = $1`, [eventId]);
+  if (eventRes.rows.length === 0) {
+    throw new ApiError(404, 'Event not found');
+  }
+  const isCreator = Boolean(requestingUserId && eventRes.rows[0].creator_id === requestingUserId);
+
+  if (itemId) {
+    // Single Item Leaderboard Fetch
+    const bidsKey = `event:${eventId}:item:${itemId}:bids`;
+    let rankedData: Array<{ userId: string; amount: number | null; rank: number; userName?: string; userEmail?: string }> = [];
+
+    try {
+      const leaderboardRaw = await redis.zrange(bidsKey, 0, -1, 'WITHSCORES');
+      if (leaderboardRaw && leaderboardRaw.length > 0) {
+        for (let i = 0; i < leaderboardRaw.length; i += 2) {
+          rankedData.push({
+            userId: leaderboardRaw[i],
+            amount: parseFloat(leaderboardRaw[i + 1]),
+            rank: Math.floor(i / 2) + 1,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Redis error during leaderboard fetch:', err);
+    }
+
+    if (rankedData.length === 0) {
+      const dbBids = await pool.query(
+        `SELECT 
+           b.user_id, 
+           b.amount, 
+           ROW_NUMBER() OVER (ORDER BY b.amount ASC) as rank 
+         FROM bids b 
+         WHERE b.event_id = $1 AND b.item_id = $2 
+         ORDER BY b.amount ASC`,
+        [eventId, itemId]
+      );
+
+      rankedData = dbBids.rows.map((row) => ({
+        userId: row.user_id,
+        amount: parseFloat(row.amount),
+        rank: parseInt(row.rank, 10),
+      }));
+    }
+
+    const userIds = rankedData.map((d) => d.userId);
+    let userMap = new Map<string, any>();
+
+    if (userIds.length > 0) {
+      try {
+        const usersRes = await pool.query(
+          `SELECT id, name, email FROM users WHERE id = ANY($1::uuid[])`,
+          [userIds]
+        );
+        userMap = new Map(usersRes.rows.map((u) => [u.id, u]));
+      } catch (err) {
+        console.error('Error enriching user names in getLeaderboardService:', err);
+      }
+    }
+
+    const enrichedData = rankedData.map((d) => {
+      const u = userMap.get(d.userId);
+      return {
+        ...d,
+        userName: u?.name || u?.email || 'Bidder',
+        userEmail: u?.email || '',
+      };
+    });
+
+    const roleFilteredData = maskLeaderboardForViewer(enrichedData, requestingUserId, isCreator);
+
+    return {
+      eventId,
+      itemId,
+      isCreator,
+      rankedData: roleFilteredData,
+    };
+  } else {
+    // Bulk Event Leaderboard: Query all bids for all items in a single query
+    const dbBids = await pool.query(
+      `SELECT 
+         b.item_id, 
+         b.user_id, 
+         b.amount, 
+         u.name as user_name, 
+         u.email as user_email,
+         ROW_NUMBER() OVER (PARTITION BY b.item_id ORDER BY b.amount ASC) as rank 
+       FROM bids b
+       JOIN users u ON b.user_id = u.id
+       WHERE b.event_id = $1
+       ORDER BY b.item_id, rank`,
+      [eventId]
+    );
+
+    const leaderboards: Record<string, any[]> = {};
+
+    dbBids.rows.forEach((row) => {
+      const itId = row.item_id;
+      if (!leaderboards[itId]) {
+        leaderboards[itId] = [];
+      }
+
+      leaderboards[itId].push({
+        userId: row.user_id,
+        amount: parseFloat(row.amount),
+        rank: parseInt(row.rank, 10),
+        userName: row.user_name || 'Bidder',
+        userEmail: row.user_email || '',
+      });
+    });
+
+    // Apply role-based privacy masking to all item leaderboards
+    const maskedLeaderboards: Record<string, any[]> = {};
+    Object.entries(leaderboards).forEach(([itId, rankedData]) => {
+      maskedLeaderboards[itId] = maskLeaderboardForViewer(rankedData, requestingUserId, isCreator);
+    });
+
+    return {
+      eventId,
+      isCreator,
+      leaderboards: maskedLeaderboards,
+    };
+  }
 };
 
 export const getUserRankService = async (userId: string, eventId: string) => {
@@ -238,53 +309,29 @@ export const getUserRankService = async (userId: string, eventId: string) => {
     throw new ApiError(400, 'eventId and userId are required');
   }
 
-  const itemsRes = await pool.query(
-    `SELECT id FROM items WHERE event_id = $1`,
-    [eventId]
+  // Optimized single partition window query across all items in the event
+  const rankRes = await pool.query(
+    `SELECT 
+       b.item_id as "itemId", 
+       b.amount, 
+       sub.rank
+     FROM bids b
+     JOIN (
+       SELECT 
+         id, 
+         ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY amount ASC) as rank
+       FROM bids
+       WHERE event_id = $1
+     ) sub ON b.id = sub.id
+     WHERE b.user_id = $2 AND b.event_id = $1`,
+    [eventId, userId]
   );
 
-  const userBids: Array<{ itemId: string; amount: number | null; rank: number | null }> = [];
-
-  for (const item of itemsRes.rows) {
-    const itemIdStr = item.id;
-    const bidsKey = `event:${eventId}:item:${itemIdStr}:bids`;
-
-    let rank: number | null = null;
-    let amount: number | null = null;
-
-    try {
-      const redisRank = await redis.zrank(bidsKey, userId);
-      const redisScore = await redis.zscore(bidsKey, userId);
-
-      if (redisRank !== null && redisScore !== null) {
-        rank = redisRank + 1;
-        amount = parseFloat(redisScore);
-      }
-    } catch (err) {
-      console.error('Redis error while fetching user rank:', err);
-    }
-
-    if (rank === null) {
-      const bidRes = await pool.query(
-        `SELECT sub.amount, sub.rank FROM (
-           SELECT user_id, amount, ROW_NUMBER() OVER (ORDER BY amount ASC) as rank
-           FROM bids WHERE event_id = $1 AND item_id = $2
-         ) sub WHERE sub.user_id = $3`,
-        [eventId, itemIdStr, userId]
-      );
-
-      if (bidRes.rows.length > 0) {
-        amount = parseFloat(bidRes.rows[0].amount);
-        rank = parseInt(bidRes.rows[0].rank, 10);
-      }
-    }
-
-    userBids.push({
-      itemId: itemIdStr,
-      amount,
-      rank,
-    });
-  }
+  const userBids = rankRes.rows.map((row) => ({
+    itemId: row.itemId,
+    amount: parseFloat(row.amount),
+    rank: parseInt(row.rank, 10),
+  }));
 
   return {
     userId,

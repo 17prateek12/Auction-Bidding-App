@@ -18,10 +18,41 @@ const MyEventSection = () => {
 
   const eventsList = useMemo(() => (Array.isArray(myEvents) ? myEvents : []), [myEvents]);
 
+  // Compute status dynamically on the client to avoid backend clock sync latency/drift
   const { activeEvents, upcomingEvents, endedEvents } = useMemo(() => {
-    const active = eventsList.filter((e) => (e.event_status || e.eventStatus) === 'active');
-    const upcoming = eventsList.filter((e) => (e.event_status || e.eventStatus) === 'upcoming');
-    const ended = eventsList.filter((e) => (e.event_status || e.eventStatus) === 'ended');
+    const active: any[] = [];
+    const upcoming: any[] = [];
+    const ended: any[] = [];
+
+    const now = new Date();
+
+    eventsList.forEach((e) => {
+      const startTimeRaw = e.start_time || e.startTime;
+      const endTimeRaw = e.end_time || e.endTime;
+      const rawStatus = e.event_status || e.eventStatus || 'upcoming';
+
+      const startTime = startTimeRaw ? new Date(startTimeRaw) : null;
+      const endTime = endTimeRaw ? new Date(endTimeRaw) : null;
+
+      let status = rawStatus;
+
+      if (endTime && now >= endTime) {
+        status = 'ended';
+      } else if (startTime && endTime && now >= startTime && now < endTime) {
+        status = 'active';
+      }
+
+      const enrichedEvent = { ...e, event_status: status };
+
+      if (status === 'active') {
+        active.push(enrichedEvent);
+      } else if (status === 'ended') {
+        ended.push(enrichedEvent);
+      } else {
+        upcoming.push(enrichedEvent);
+      }
+    });
+
     return { activeEvents: active, upcomingEvents: upcoming, endedEvents: ended };
   }, [eventsList]);
 
@@ -59,15 +90,15 @@ const MyEventSection = () => {
   }
 
   return (
-    <div className="space-y-10 my-6">
-      {/* 1. Live Bidding Events Group */}
-      {activeEvents.length > 0 && <LiveEventSection events={activeEvents} />}
+    <div className="w-full flex flex-col gap-8 my-6">
+      {/* 1. Live Bidding Events */}
+      <LiveEventSection events={activeEvents} />
 
-      {/* 2. Upcoming Events Group */}
-      {upcomingEvents.length > 0 && <UpcomingEventSection events={upcomingEvents} />}
+      {/* 2. Upcoming Events */}
+      <UpcomingEventSection events={upcomingEvents} />
 
-      {/* 3. Past & Completed Events Group */}
-      {endedEvents.length > 0 && <PastEventSection events={endedEvents} />}
+      {/* 3. Past & Completed Events */}
+      <PastEventSection events={endedEvents} />
     </div>
   );
 };
