@@ -41,58 +41,74 @@ export const createEventService = async ({
     status = 'ended';
   }
 
-  // Insert Event Record
-  const eventInsertRes = await pool.query(
-    `
-    INSERT INTO events (creator_id, name, description, start_time, end_time, event_date, event_status, columns)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    RETURNING *;
-  `,
-    [
-      creatorId,
-      name,
-      description || '',
-      startTime,
-      endTime,
-      eventDate || startTime,
-      status,
-      JSON.stringify(columns),
-    ]
-  );
+  const client = await pool.connect();
 
-  const savedEvent = eventInsertRes.rows[0];
-  const eventId = savedEvent.id;
+  try {
+    // Start Transaction
+    await client.query('BEGIN');
 
-  // Bulk Batch Insert Items in chunks of 500
-  const CHUNK_SIZE = 500;
-  const savedItems: any[] = [];
+    // Insert Event Record
+    const eventInsertRes = await client.query(
+      `
+      INSERT INTO events (creator_id, name, description, start_time, end_time, event_date, event_status, columns)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *;
+    `,
+      [
+        creatorId,
+        name,
+        description || '',
+        startTime,
+        endTime,
+        eventDate || startTime,
+        status,
+        JSON.stringify(columns),
+      ]
+    );
 
-  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-    const chunk = rows.slice(i, i + CHUNK_SIZE);
-    const valueTuples: string[] = [];
-    const queryParams: any[] = [];
-    let paramIndex = 1;
+    const savedEvent = eventInsertRes.rows[0];
+    const eventId = savedEvent.id;
 
-    for (const row of chunk) {
-      valueTuples.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2})`);
-      queryParams.push(eventId, JSON.stringify(row), creatorId);
-      paramIndex += 3;
+    // Bulk Batch Insert Items in chunks of 500
+    const CHUNK_SIZE = 500;
+    const savedItems: any[] = [];
+
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const valueTuples: string[] = [];
+      const queryParams: any[] = [];
+      let paramIndex = 1;
+
+      for (const row of chunk) {
+        valueTuples.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2})`);
+        queryParams.push(eventId, JSON.stringify(row), creatorId);
+        paramIndex += 3;
+      }
+
+      const bulkQuery = `
+        INSERT INTO items (event_id, column_data, created_by)
+        VALUES ${valueTuples.join(', ')}
+        RETURNING *;
+      `;
+
+      const bulkRes = await client.query(bulkQuery, queryParams);
+      savedItems.push(...bulkRes.rows);
     }
 
-    const bulkQuery = `
-      INSERT INTO items (event_id, column_data, created_by)
-      VALUES ${valueTuples.join(', ')}
-      RETURNING *;
-    `;
+    // Commit SQL changes
+    await client.query('COMMIT');
 
-    const bulkRes = await pool.query(bulkQuery, queryParams);
-    savedItems.push(...bulkRes.rows);
+    return {
+      event: savedEvent,
+      items: savedItems,
+    };
+  } catch (error) {
+    // Rollback transaction on any failure (preventing partial uploads)
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
-
-  return {
-    event: savedEvent,
-    items: savedItems,
-  };
 };
 
 export const fetchAllEventsService = async (page: number = 1, limit: number = 10) => {
@@ -106,20 +122,6 @@ export const getEventsByUserService = async (userId: string) => {
   if (!userId) {
     throw new ApiError(400, 'User ID is required');
   }
-
-  // Auto-transition upcoming events to active when their start_time is reached
-  await pool.query(
-    `UPDATE events 
-     SET event_status = 'active' 
-     WHERE event_status = 'upcoming' AND start_time <= NOW() AND end_time > NOW()`
-  );
-
-  // Auto-transition active/upcoming events to ended when their end_time has passed
-  await pool.query(
-    `UPDATE events 
-     SET event_status = 'ended' 
-     WHERE event_status IN ('active', 'upcoming') AND end_time <= NOW()`
-  );
 
   const userEventsRes = await pool.query(
     `SELECT * FROM events WHERE creator_id = $1 ORDER BY created_at DESC`,

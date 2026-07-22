@@ -84,6 +84,8 @@ export const initPostgresDb = async () => {
       );
 
       CREATE INDEX IF NOT EXISTS idx_bids_item_rank ON bids(event_id, item_id, amount ASC);
+      CREATE INDEX IF NOT EXISTS idx_items_event ON items(event_id);
+      CREATE INDEX IF NOT EXISTS idx_events_creator ON events(creator_id);
 
       -- Entire Event Snapshots Table
       CREATE TABLE IF NOT EXISTS entire_events (
