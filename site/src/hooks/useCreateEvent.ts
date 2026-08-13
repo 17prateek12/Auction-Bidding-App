@@ -1,10 +1,15 @@
 import { useMutation } from '@tanstack/react-query';
 import { useCreateEventStore } from '@/store/create-event-form-store';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import Cookies from 'js-cookie';
 import { toast } from 'react-toastify';
 import { useRouter } from 'next/navigation';
 import { API_BASE_URL } from '@/lib/env';
+import { EventForm } from '@/types/create-event-type';
+
+interface ErrorResponse {
+  message?: string;
+}
 
 export const useCreateEvent = () => {
   const reset = useCreateEventStore((s) => s.reset);
@@ -14,7 +19,7 @@ export const useCreateEvent = () => {
   const apiBaseUrl = API_BASE_URL;
 
   return useMutation({
-    mutationFn: async (eventPayload: any) => {
+    mutationFn: async (eventPayload: EventForm) => {
       const res = await axios.post(
         `${apiBaseUrl}/api/event/create-event`,
         eventPayload,
@@ -32,7 +37,7 @@ export const useCreateEvent = () => {
       reset();
       router.push('/mine-event');
     },
-    onError: (error: any) => {
+    onError: (error: AxiosError<ErrorResponse>) => {
       console.error('Create Event Error:', error);
       const msg = error?.response?.data?.message || error?.message || 'Failed to create event';
       toast.error(msg);

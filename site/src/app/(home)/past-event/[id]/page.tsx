@@ -6,10 +6,11 @@ import axios from 'axios';
 import Cookies from 'js-cookie';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, Sparkles, Send, Loader2, CheckCircle2, Bot, User, Trophy, FileText } from 'lucide-react';
+import { ArrowLeft, Sparkles, Send, Loader2, CheckCircle2, Bot, User, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'react-toastify';
 import { API_BASE_URL } from '@/lib/env';
+import { SourcingEvent, SourcingItem } from '@/interface/interface';
 
 const API_URL = API_BASE_URL;
 
@@ -24,8 +25,8 @@ const PastEventDetailsPage = () => {
   const eventId = (params?.id as string) || '';
 
   const [mounted, setMounted] = useState(false);
-  const [eventData, setEventData] = useState<any>(null);
-  const [items, setItems] = useState<any[]>([]);
+  const [eventData, setEventData] = useState<SourcingEvent | null>(null);
+  const [items, setItems] = useState<SourcingItem[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -52,8 +53,8 @@ const PastEventDetailsPage = () => {
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
       const res = await axios.get(`${API_URL}/api/event/user-event/${eventId}`, { headers });
-      const event = res.data.event || {};
-      const itemsList = res.data.item || res.data.items || [];
+      const event: SourcingEvent = res.data.event || {};
+      const itemsList: SourcingItem[] = res.data.item || res.data.items || [];
 
       setEventData(event);
       setItems(itemsList);
@@ -118,7 +119,7 @@ const PastEventDetailsPage = () => {
       };
 
       setMessages((prev) => [...prev, aiMsg]);
-    } catch (error: any) {
+    } catch (error) {
       console.error('Gemini AI Query Error:', error);
       toast.error('Failed to query Gemini AI assistant.');
       setMessages((prev) => [
@@ -197,7 +198,7 @@ const PastEventDetailsPage = () => {
                 </thead>
                 <tbody className="divide-y divide-gray-800 text-sm text-gray-300">
                   {items.map((item, rowIndex) => {
-                    let colData: Record<string, any> = {};
+                    let colData: Record<string, string | number> = {};
                     if (typeof item.column_data === 'string') {
                       try {
                         colData = JSON.parse(item.column_data);
@@ -205,7 +206,7 @@ const PastEventDetailsPage = () => {
                         colData = {};
                       }
                     } else if (typeof item.column_data === 'object' && item.column_data !== null) {
-                      colData = item.column_data;
+                      colData = item.column_data as Record<string, string | number>;
                     }
 
                     return (

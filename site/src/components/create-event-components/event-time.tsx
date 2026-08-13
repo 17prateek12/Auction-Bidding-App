@@ -2,7 +2,7 @@
 import React from 'react';
 import { useCreateEventStore } from '@/store/create-event-form-store';
 import CreateEventDate from './create-event-date-picker';
-import { EventForm, TimeObject } from '@/types/create-event-type';
+import { TimeObject } from '@/types/create-event-type';
 
 const EventDateTimePicker = () => {
   const { eventDate } = useCreateEventStore((s) => s.data);
@@ -22,21 +22,21 @@ const EventDateTimePicker = () => {
   };
 
   const handleFieldChange = (
-    field: keyof EventForm | 'eventstartTime' | 'eventendTime',
-    value: any
+    field: 'eventDate' | 'eventstartTime' | 'eventendTime',
+    value: Date | TimeObject
   ) => {
-    if (field === 'eventDate') {
+    if (field === 'eventDate' && value instanceof Date) {
       setField('eventDate', value);
       setField('startTime', getISOTime(value, eventStartTime));
       setField('endTime', getISOTime(value, eventEndTime));
     }
 
-    if (field === 'eventstartTime') {
+    if (field === 'eventstartTime' && !(value instanceof Date)) {
       setEventStartTime(value);
       setField('startTime', getISOTime(eventDate, value));
     }
 
-    if (field === 'eventendTime') {
+    if (field === 'eventendTime' && !(value instanceof Date)) {
       setEventEndTime(value);
       setField('endTime', getISOTime(eventDate, value));
     }

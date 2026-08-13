@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Activity, Clock, ShieldAlert, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Clock, ShieldAlert, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
+import { SourcingEvent } from '@/interface/interface';
 
 interface LiveEventHeaderProps {
-  event: any;
+  event: SourcingEvent | null;
   isCreator: boolean;
 }
 
@@ -14,15 +15,16 @@ const LiveEventHeader: React.FC<LiveEventHeaderProps> = ({ event, isCreator }) =
   const [isEnded, setIsEnded] = useState<boolean>(false);
 
   useEffect(() => {
-    if (event?.event_status === 'ended') {
+    if (event?.event_status === 'ended' || event?.eventStatus === 'ended') {
       setIsEnded(true);
       setTimeLeft('00:00:00');
       return;
     }
 
-    if (!event?.end_time && !event?.endTime) return;
+    const rawEndTime = event?.end_time || event?.endTime;
+    if (!rawEndTime) return;
 
-    const endTimeDate = new Date(event.end_time || event.endTime).getTime();
+    const endTimeDate = new Date(rawEndTime).getTime();
 
     const updateTimer = () => {
       const now = new Date().getTime();
@@ -49,8 +51,12 @@ const LiveEventHeader: React.FC<LiveEventHeaderProps> = ({ event, isCreator }) =
 
   const eventName = event?.name || event?.eventName || 'Live Reverse Auction Event';
   const description = event?.description || 'Competitive reverse bidding event for registered items.';
-  const startDateStr = event?.start_time ? format(new Date(event.start_time), 'MMM dd, yyyy - hh:mm a') : 'N/A';
-  const endDateStr = event?.end_time ? format(new Date(event.end_time), 'MMM dd, yyyy - hh:mm a') : 'N/A';
+  
+  const rawStartTime = event?.start_time || event?.startTime;
+  const rawEndTime = event?.end_time || event?.endTime;
+
+  const startDateStr = rawStartTime ? format(new Date(rawStartTime), 'MMM dd, yyyy - hh:mm a') : 'N/A';
+  const endDateStr = rawEndTime ? format(new Date(rawEndTime), 'MMM dd, yyyy - hh:mm a') : 'N/A';
 
   return (
     <div className="w-full p-6 rounded-2xl bg-gradient-to-r from-gray-900 via-gray-900/90 to-emerald-950/40 border border-gray-700 shadow-2xl backdrop-blur-md flex flex-col md:flex-row items-start md:items-center justify-between gap-6">

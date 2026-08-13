@@ -98,6 +98,15 @@ export const createEventService = async ({
     // Commit SQL changes
     await client.query('COMMIT');
 
+    // Schedule BullMQ delayed job for event finalization (after COMMIT)
+    try {
+      const delayMs = new Date(endTime).getTime() - Date.now();
+      const { scheduleEventFinalization } = require('../workers/finalizationQueue');
+      await scheduleEventFinalization(savedEvent.id, delayMs);
+    } catch (schedErr) {
+      console.error('Failed to schedule event finalization during creation:', schedErr);
+    }
+
     return {
       event: savedEvent,
       items: savedItems,

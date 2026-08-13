@@ -6,6 +6,8 @@ import EventCard from '../reusable-components/event-card';
 import { Loader2, Search, Filter, Activity, Clock, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
+import { SourcingEvent } from '@/interface/interface';
+
 const AllEventsDashboard = () => {
   const [mounted, setMounted] = useState(false);
   const { data: rawData, isLoading, isError } = useAllEvents();
@@ -28,7 +30,7 @@ const AllEventsDashboard = () => {
 
   // Extract events array and compute client-side status dynamically to avoid clock sync drift
   const eventsList = useMemo(() => {
-    let list: any[] = [];
+    let list: SourcingEvent[] = [];
     if (rawData) {
       if (Array.isArray(rawData)) {
         list = rawData;

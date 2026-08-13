@@ -2,8 +2,7 @@ import {
     Sidebar,
     SidebarContent,
     SidebarHeader,
-} from "@/components/ui/sidebar"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+} from "@/components/ui/sidebar";
 import SidebarMenuHeader from "./sidebar-menu-header";
 import SidebarMenuContent from "./sidebar-menu-content";
 

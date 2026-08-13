@@ -7,10 +7,12 @@ import { Server } from 'socket.io';
 import { eventSockethandler } from './sockets/eventSocket';
 import { bidSocketHandler } from './sockets/bidSocket';
 import { initBidWorker } from './workers/bidWorker';
+import { initFinalizationWorker } from './workers/finalizationWorker';
 
 dotenv.config();
 initPostgresDb();
 initBidWorker();
+initFinalizationWorker();
 
 const httpServer = createServer(app);
 

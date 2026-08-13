@@ -1,7 +1,12 @@
 import React from 'react';
 import EventCard from '../reusable-components/event-card';
+import { SourcingEvent } from '@/interface/interface';
 
-const LiveEventSection: React.FC<{ events?: any[] }> = ({ events = [] }) => {
+interface LiveEventSectionProps {
+  events?: SourcingEvent[];
+}
+
+const LiveEventSection: React.FC<LiveEventSectionProps> = ({ events = [] }) => {
   if (events.length === 0) return null;
 
   return (

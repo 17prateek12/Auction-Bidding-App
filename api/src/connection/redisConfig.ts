@@ -2,6 +2,8 @@ import Redis from 'ioredis';
 import dotenv from 'dotenv';
 import { rehydrateRedisCacheFromPostgres } from '../utils/redisRehydration';
 
+import { URL } from 'url';
+
 dotenv.config();
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
@@ -10,24 +12,57 @@ const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
 
 let isRedisHealthy = false;
 
-const redisOptions: any = {
-  host: REDIS_HOST,
-  port: REDIS_PORT,
-  retryStrategy(times: number) {
-    const delay = Math.min(times * 50, 2000);
-    return delay;
-  },
+const isUrl = REDIS_HOST.startsWith('redis://') || REDIS_HOST.startsWith('rediss://');
+
+// Helper to parse Redis URL for BullMQ/ioredis compatibility
+export const parseRedisUrl = (urlStr: string) => {
+  try {
+    const parsed = new URL(urlStr);
+    return {
+      host: parsed.hostname,
+      port: parsed.port ? parseInt(parsed.port, 10) : 6379,
+      username: parsed.username || undefined,
+      password: parsed.password || undefined,
+      tls: parsed.protocol === 'rediss:' ? {} : undefined,
+    };
+  } catch (err) {
+    console.error('Failed to parse Redis URL:', err);
+    return {
+      host: 'localhost',
+      port: 6782,
+    };
+  }
 };
 
-if (REDIS_PASSWORD) {
-  redisOptions.password = REDIS_PASSWORD;
-}
+const redis = isUrl
+  ? new Redis(REDIS_HOST, {
+      retryStrategy(times: number) {
+        const delay = Math.min(times * 50, 2000);
+        return delay;
+      },
+    })
+  : new Redis({
+      host: REDIS_HOST,
+      port: REDIS_PORT,
+      ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
+      retryStrategy(times: number) {
+        const delay = Math.min(times * 50, 2000);
+        return delay;
+      },
+    });
 
-const redis = new Redis(redisOptions);
+export const redisConnection = isUrl
+  ? parseRedisUrl(REDIS_HOST)
+  : {
+      host: REDIS_HOST,
+      port: REDIS_PORT,
+      ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
+    };
 
 redis.on('connect', () => {
   isRedisHealthy = true;
-  console.log(`Successfully connected to Redis at ${REDIS_HOST}:${REDIS_PORT}`);
+  const displayHost = isUrl ? new URL(REDIS_HOST).hostname : `${REDIS_HOST}:${REDIS_PORT}`;
+  console.log(`Successfully connected to Redis at ${displayHost}`);
   // Automatically re-hydrate Redis ZSET cache from PostgreSQL on connection
   rehydrateRedisCacheFromPostgres().catch((err) =>
     console.error('Failed auto rehydration on Redis connect:', err)

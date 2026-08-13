@@ -13,7 +13,7 @@ interface CreateEventDateProps {
   eventDate?: Date;
   eventstartTime: TimeObject;
   eventendTime: TimeObject;
-  onChange: (field: any, value: any) => void;
+  onChange: (field: 'eventDate' | 'eventstartTime' | 'eventendTime', value: Date | TimeObject) => void;
 }
 
 const CreateEventDate: React.FC<CreateEventDateProps> = ({

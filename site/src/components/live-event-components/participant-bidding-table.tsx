@@ -5,11 +5,12 @@ import { Input } from '../ui/input';
 import { Gavel, Trophy, Lock } from 'lucide-react';
 import { FixedSizeList as List, areEqual } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
+import { SourcingItem, UserBidState } from '@/interface/interface';
 
 interface ParticipantBiddingTableProps {
-  items: any[];
+  items: SourcingItem[];
   columns: string[];
-  userBids: Record<string, { amount: number; rank: number }>;
+  userBids: Record<string, UserBidState>;
   onPlaceBid: (itemId: string, amount: number) => void;
   submittingItemId: string | null;
   isEventEnded?: boolean;
@@ -102,9 +103,9 @@ DebouncedBidInput.displayName = 'DebouncedBidInput';
 
 // Define row item data type
 interface RowData {
-  items: any[];
+  items: SourcingItem[];
   columns: string[];
-  userBids: Record<string, { amount: number; rank: number }>;
+  userBids: Record<string, UserBidState>;
   onPlaceBid: (itemId: string, amount: number) => void;
   submittingItemId: string | null;
   isEventEnded?: boolean;
@@ -116,8 +117,8 @@ interface RowData {
 const BiddingTableRow = memo(({ index, style, data }: { index: number; style: React.CSSProperties; data: RowData }) => {
   const { items, columns, userBids, onPlaceBid, submittingItemId, isEventEnded } = data;
   const item = items[index];
-  const itemId = item.id || item._id;
-  let colData: Record<string, any> = {};
+  const itemId = item.id || item._id || '';
+  let colData: Record<string, string | number> = {};
 
   if (typeof item.column_data === 'string') {
     try {
@@ -126,7 +127,7 @@ const BiddingTableRow = memo(({ index, style, data }: { index: number; style: Re
       colData = {};
     }
   } else if (typeof item.column_data === 'object' && item.column_data !== null) {
-    colData = item.column_data;
+    colData = item.column_data as Record<string, string | number>;
   }
 
   const myBid = userBids[itemId];

@@ -9,12 +9,13 @@ export const processEndedEventsService = async () => {
 
   try {
     const endedEventsRes = await pool.query(
-      `SELECT * FROM events WHERE end_time <= $1 AND event_status != 'ended'`,
+      `SELECT * FROM events WHERE end_time < $1 - interval '10 minutes' AND event_status != 'ended'`,
       [currentTime]
     );
 
     for (const eventRow of endedEventsRes.rows) {
       const eventId = eventRow.id;
+      console.warn(`[Cron Sweep Warning] Event ${eventId} ("${eventRow.name}") was found stuck. Finalizing via safety net cron.`);
 
       // Update status to 'ended'
       await pool.query(`UPDATE events SET event_status = 'ended' WHERE id = $1`, [

@@ -7,6 +7,7 @@ import UpcomingEventSection from './upcoming-event-section';
 import PastEventSection from './past-event-section';
 import { Loader2, PlusCircle } from 'lucide-react';
 import Link from 'next/link';
+import { SourcingEvent } from '@/interface/interface';
 
 const MyEventSection = () => {
   const [mounted, setMounted] = useState(false);
@@ -16,13 +17,13 @@ const MyEventSection = () => {
     setMounted(true);
   }, []);
 
-  const eventsList = useMemo(() => (Array.isArray(myEvents) ? myEvents : []), [myEvents]);
+  const eventsList: SourcingEvent[] = useMemo(() => (Array.isArray(myEvents) ? myEvents : []), [myEvents]);
 
   // Compute status dynamically on the client to avoid backend clock sync latency/drift
   const { activeEvents, upcomingEvents, endedEvents } = useMemo(() => {
-    const active: any[] = [];
-    const upcoming: any[] = [];
-    const ended: any[] = [];
+    const active: SourcingEvent[] = [];
+    const upcoming: SourcingEvent[] = [];
+    const ended: SourcingEvent[] = [];
 
     const now = new Date();
 

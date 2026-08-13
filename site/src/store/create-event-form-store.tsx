@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { EventStore } from '@/types/create-event-type';
 
-export const useCreateEventStore = create<EventStore>((set, get) => ({
+export const useCreateEventStore = create<EventStore>((set) => ({
     data: {
         eventName: '',
         description: '',

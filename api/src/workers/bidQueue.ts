@@ -1,12 +1,6 @@
 import { Queue } from 'bullmq';
 
-const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT) : 6782;
-
-const redisConnection = {
-  host: REDIS_HOST,
-  port: REDIS_PORT,
-};
+import { redisConnection } from '../connection/redisConfig';
 
 export const bidQueue = new Queue('bid-sync-queue', {
   connection: redisConnection,

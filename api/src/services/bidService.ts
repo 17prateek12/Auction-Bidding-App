@@ -52,7 +52,7 @@ export const placeBidService = async ({
 
   // 1. Fetch Event & Item Details (Validate creator is not bidding, event is active)
   const eventRes = await pool.query(
-    `SELECT event_status, creator_id FROM events WHERE id = $1`,
+    `SELECT event_status, creator_id, end_time FROM events WHERE id = $1`,
     [eventId]
   );
 
@@ -102,22 +102,45 @@ export const placeBidService = async ({
     throw new ApiError(503, 'Bidding is temporarily paused — please try again shortly');
   }
 
+  // Anti-sniping dynamic extension check
+  const EXTEND_WINDOW_MS = 60 * 1000; // 1 minute
+  const msToEnd = new Date(event.end_time).getTime() - Date.now();
+  if (msToEnd > 0 && msToEnd < EXTEND_WINDOW_MS) {
+    try {
+      const { extendEventFinalization } = require('../workers/finalizationQueue');
+      await extendEventFinalization(eventId, EXTEND_WINDOW_MS);
+      
+      const newEndTime = new Date(Date.now() + EXTEND_WINDOW_MS);
+      await pool.query(
+        `UPDATE events SET end_time = $1 WHERE id = $2`,
+        [newEndTime, eventId]
+      );
+      event.end_time = newEndTime.toISOString();
+      console.log(`[Anti-Sniping] Extended event ${eventId} finalization by 1 minute. New end_time: ${newEndTime}`);
+      
+      // Broadcast new end time to all room participants so UI updates in real-time
+      const { getSocket } = require('../sockets/bidSocket');
+      const io = getSocket();
+      if (io) {
+        io.to(`event:${eventId}`).emit('event:extended', { eventId, endTime: newEndTime.toISOString() });
+      }
+    } catch (extendErr) {
+      console.error('[Anti-Sniping] Failed to extend event finalization:', extendErr);
+    }
+  }
+
   // 3. Queue Background Job to write-behind to PostgreSQL (Single Source of Truth)
   const myRankObj = rankedData.find((b) => b.userId === userId);
   const myRank = myRankObj ? myRankObj.rank : 1;
 
   try {
-    const { getQueue } = require('../utils/bullmqQueue');
-    const bidQueue = getQueue();
-    await bidQueue.add('sync-bid-to-pg', {
+    const { addBidToSyncQueue } = require('../workers/bidQueue');
+    await addBidToSyncQueue({
       eventId,
       itemId,
       userId,
       amount,
       rank: myRank,
-    }, {
-      removeOnComplete: true,
-      removeOnFail: false,
     });
   } catch (qErr) {
     console.error('BullMQ job dispatch failed, falling back to direct write-through:', qErr);

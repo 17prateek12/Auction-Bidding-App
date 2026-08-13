@@ -10,7 +10,7 @@ export type EventForm = {
   startTime: string | undefined;
   endTime: string | undefined;
   columns: string[];
-  rows: Record<string, any>[];
+  rows: Record<string, string | number>[];
 };
 
 export type EventStore = {

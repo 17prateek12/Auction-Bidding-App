@@ -6,22 +6,50 @@ import Cookies from 'js-cookie';
 import { toast } from 'react-toastify';
 import { getSocket, joinEventRoom, placeBidSocket } from '@/lib/socketService';
 import { API_BASE_URL } from '@/lib/env';
+import { SourcingEvent, SourcingItem, BidderEntry, UserBidState } from '@/interface/interface';
 
 const API_URL = API_BASE_URL;
 
+interface UserRankResponse {
+  userBids?: Array<{
+    itemId: string;
+    amount: number | null;
+    rank: number | null;
+  }>;
+}
+
+interface LeaderboardResponse {
+  leaderboards?: Record<string, BidderEntry[]>;
+}
+
+interface SocketUpdateAllPayload {
+  leaderboards?: Record<string, BidderEntry[]>;
+}
+
+interface SocketUpdateSinglePayload {
+  itemId: string;
+  rankedData: BidderEntry[];
+}
+
+interface SocketBidSuccessPayload {
+  itemId: string;
+  amount: number;
+  rank: number;
+}
+
 export const useLiveBiddingRoom = (eventId: string) => {
-  const [eventDetails, setEventDetails] = useState<any>(null);
+  const [eventDetails, setEventDetails] = useState<SourcingEvent | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<SourcingItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isError, setIsError] = useState<boolean>(false);
   const [isEventEnded, setIsEventEnded] = useState<boolean>(false);
 
-  // Leaderboards state: { itemId: Array<{ userId, amount, rank, userName }> }
-  const [leaderboards, setLeaderboards] = useState<Record<string, any[]>>({});
+  // Leaderboards state: { itemId: BidderEntry[] }
+  const [leaderboards, setLeaderboards] = useState<Record<string, BidderEntry[]>>({});
 
   // Current User's Bids & Ranks state: { itemId: { amount, rank } }
-  const [userBids, setUserBids] = useState<Record<string, { amount: number; rank: number }>>({});
+  const [userBids, setUserBids] = useState<Record<string, UserBidState>>({});
 
   const [submittingItemId, setSubmittingItemId] = useState<string | null>(null);
 
@@ -56,8 +84,8 @@ export const useLiveBiddingRoom = (eventId: string) => {
       });
 
       const data = response.data;
-      const event = data.event || data;
-      const itemList = data.items || [];
+      const event: SourcingEvent = data.event || data;
+      const itemList: SourcingItem[] = data.items || [];
 
       setEventDetails(event);
       setItems(itemList);
@@ -83,7 +111,7 @@ export const useLiveBiddingRoom = (eventId: string) => {
       }
       setColumns(parsedCols);
       setIsError(false);
-    } catch (err) {
+    } catch {
       setIsError(true);
       toast.error('Failed to load event data.');
     } finally {
@@ -95,19 +123,19 @@ export const useLiveBiddingRoom = (eventId: string) => {
     fetchEventItems();
   }, [fetchEventItems]);
 
-  // Helper to extract user's own bid and rank from rankedData array
-  const extractUserBid = useCallback((rankedData: any[], userId?: string) => {
+  // Helper to extract user's own bid and rank from BidderEntry array
+  const extractUserBid = useCallback((rankedData: BidderEntry[], userId?: string): UserBidState | null => {
     if (!Array.isArray(rankedData)) return null;
     const myBid = rankedData.find(
-      (b: any) =>
-        (userId && (b.userId === userId || b.user_id === userId)) ||
+      (b: BidderEntry) =>
+        (userId && (b.userId === userId)) ||
         (b.userId && b.userId !== 'masked')
     );
 
     if (myBid && myBid.amount !== null && myBid.rank !== null) {
       return {
-        amount: parseFloat(myBid.amount),
-        rank: parseInt(myBid.rank, 10),
+        amount: myBid.amount,
+        rank: myBid.rank,
       };
     }
     return null;
@@ -122,14 +150,14 @@ export const useLiveBiddingRoom = (eventId: string) => {
 
       // 1. Poll User Rank Fallback (Single fast indexed query)
       if (token) {
-        const userRankRes = await axios.get(`${API_URL}/api/bid/user-rank?eventId=${eventId}`, { headers });
+        const userRankRes = await axios.get<UserRankResponse>(`${API_URL}/api/bid/user-rank?eventId=${eventId}`, { headers });
         if (userRankRes.data?.userBids && Array.isArray(userRankRes.data.userBids)) {
-          const newUserBids: Record<string, { amount: number; rank: number }> = {};
-          userRankRes.data.userBids.forEach((b: any) => {
+          const newUserBids: Record<string, UserBidState> = {};
+          userRankRes.data.userBids.forEach((b) => {
             if (b.itemId && b.amount !== null && b.rank !== null) {
               newUserBids[b.itemId] = {
-                amount: parseFloat(b.amount),
-                rank: parseInt(b.rank, 10),
+                amount: b.amount,
+                rank: b.rank,
               };
             }
           });
@@ -138,11 +166,11 @@ export const useLiveBiddingRoom = (eventId: string) => {
       }
 
       // 2. Poll Leaderboard in Bulk (Single fast query instead of 10,000 separate HTTP calls!)
-      const lbRes = await axios.get(`${API_URL}/api/bid/leaderboard?eventId=${eventId}`, { headers });
+      const lbRes = await axios.get<LeaderboardResponse>(`${API_URL}/api/bid/leaderboard?eventId=${eventId}`, { headers });
       if (lbRes.data?.leaderboards) {
         setLeaderboards(lbRes.data.leaderboards);
       }
-    } catch (err) {
+    } catch {
       // Silent catch for HTTP polling fallback
     }
   }, [eventId]);
@@ -170,12 +198,12 @@ export const useLiveBiddingRoom = (eventId: string) => {
     const socket = getSocket();
     joinEventRoom(eventId);
 
-    const handleUpdateLeaderboardAll = (data: any) => {
+    const handleUpdateLeaderboardAll = (data: SocketUpdateAllPayload) => {
       if (data && data.leaderboards) {
         setLeaderboards(data.leaderboards);
 
-        const newUserBids: Record<string, { amount: number; rank: number }> = {};
-        Object.entries(data.leaderboards).forEach(([itemId, rankedData]: [string, any]) => {
+        const newUserBids: Record<string, UserBidState> = {};
+        Object.entries(data.leaderboards).forEach(([itemId, rankedData]) => {
           const userBid = extractUserBid(rankedData, currentUserId);
           if (userBid) {
             newUserBids[itemId] = userBid;
@@ -187,7 +215,7 @@ export const useLiveBiddingRoom = (eventId: string) => {
       }
     };
 
-    const handleUpdateLeaderboard = (data: any) => {
+    const handleUpdateLeaderboard = (data: SocketUpdateSinglePayload) => {
       if (data && data.itemId && Array.isArray(data.rankedData)) {
         const { itemId, rankedData } = data;
 
@@ -206,15 +234,15 @@ export const useLiveBiddingRoom = (eventId: string) => {
       }
     };
 
-    const handleBidSuccess = (data: any) => {
+    const handleBidSuccess = (data: SocketBidSuccessPayload) => {
       toast.success(`🎉 Bid of $${data.amount} placed! (Rank #${data.rank})`);
       setSubmittingItemId(null);
       if (data.itemId && data.rank && data.amount) {
         setUserBids((prev) => ({
           ...prev,
           [data.itemId]: {
-            amount: parseFloat(data.amount),
-            rank: parseInt(data.rank, 10),
+            amount: data.amount,
+            rank: data.rank,
           },
         }));
       }
@@ -225,16 +253,30 @@ export const useLiveBiddingRoom = (eventId: string) => {
       toast.info('🔒 Event has ended. Bidding closed!');
     };
 
+    const handleEventExtended = (data: { eventId: string; endTime: string }) => {
+      setEventDetails((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          end_time: data.endTime,
+        };
+      });
+      setIsEventEnded(false);
+      toast.info('⏱️ Event duration extended due to a late bid (anti-sniping)!');
+    };
+
     socket.on('updateLeaderboardAll', handleUpdateLeaderboardAll);
     socket.on('updateLeaderboard', handleUpdateLeaderboard);
     socket.on('bid:success', handleBidSuccess);
     socket.on('event:ended', handleEventEnded);
+    socket.on('event:extended', handleEventExtended);
 
     return () => {
       socket.off('updateLeaderboardAll', handleUpdateLeaderboardAll);
       socket.off('updateLeaderboard', handleUpdateLeaderboard);
       socket.off('bid:success', handleBidSuccess);
       socket.off('event:ended', handleEventEnded);
+      socket.off('event:extended', handleEventExtended);
     };
   }, [eventId, currentUserId, extractUserBid]);
 

@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/sidebar';
 import Link from 'next/link';
 import { NavBarItem } from '@/interface/interface';
-import { House, Radio, ChartNoAxesGantt, Plus, History } from 'lucide-react';
+import { House, Radio, ChartNoAxesGantt, Plus } from 'lucide-react';
 
 const SidebarMenuContent = () => {
   const navItem: NavBarItem[] = [

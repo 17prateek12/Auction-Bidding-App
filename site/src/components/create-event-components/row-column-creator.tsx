@@ -95,7 +95,7 @@ const RowColumnCreator = () => {
         const workbook = XLSX.read(fileData, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const jsonData: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet);
+        const jsonData: Record<string, string | number>[] = XLSX.utils.sheet_to_json(worksheet);
 
         if (jsonData.length === 0) {
           toast.warn('Uploaded file is empty.');

@@ -7,16 +7,18 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { FixedSizeList as List, areEqual } from 'react-window';
 import AutoSizer from 'react-virtualized-auto-sizer';
 
+import { SourcingItem, BidderEntry } from '@/interface/interface';
+
 interface CreatorLeaderboardTableProps {
-  items: any[];
+  items: SourcingItem[];
   columns: string[];
-  leaderboards: Record<string, any[]>;
+  leaderboards: Record<string, BidderEntry[]>;
 }
 
 interface RowData {
-  items: any[];
+  items: SourcingItem[];
   columns: string[];
-  leaderboards: Record<string, any[]>;
+  leaderboards: Record<string, BidderEntry[]>;
 }
 
 // ----------------------------------------------------------------------
@@ -25,8 +27,8 @@ interface RowData {
 const CreatorTableRow = memo(({ index, style, data }: { index: number; style: React.CSSProperties; data: RowData }) => {
   const { items, columns, leaderboards } = data;
   const item = items[index];
-  const itemId = item.id || item._id;
-  let colData: Record<string, any> = {};
+  const itemId = item.id || item._id || '';
+  let colData: Record<string, string | number> = {};
 
   if (typeof item.column_data === 'string') {
     try {
@@ -35,7 +37,7 @@ const CreatorTableRow = memo(({ index, style, data }: { index: number; style: Re
       colData = {};
     }
   } else if (typeof item.column_data === 'object' && item.column_data !== null) {
-    colData = item.column_data;
+    colData = item.column_data as Record<string, string | number>;
   }
 
   const itemBids = leaderboards[itemId] || [];
@@ -69,7 +71,7 @@ const CreatorTableRow = memo(({ index, style, data }: { index: number; style: Re
           <div className="flex flex-col items-center justify-center">
             <span className="inline-flex items-center gap-1 text-xs font-bold text-yellow-400 truncate max-w-[180px]">
               <Trophy className="w-3.5 h-3.5 flex-shrink-0" />
-              {rank1Bid.userName || rank1Bid.user_name || rank1Bid.userEmail || 'Participant'}
+              {rank1Bid.userName || rank1Bid.userEmail || 'Participant'}
             </span>
           </div>
         ) : (
@@ -79,9 +81,9 @@ const CreatorTableRow = memo(({ index, style, data }: { index: number; style: Re
 
       {/* Lowest Price ($) */}
       <div className="w-[160px] flex-shrink-0 border-r border-gray-800/80 text-center bg-emerald-950/10 self-stretch flex items-center justify-center px-4">
-        {rank1Bid ? (
+        {rank1Bid && rank1Bid.amount !== null ? (
           <span className="font-mono font-bold text-emerald-400 text-base">
-            ${parseFloat(rank1Bid.amount).toLocaleString()}
+            ${rank1Bid.amount.toLocaleString()}
           </span>
         ) : (
           <span className="text-xs text-gray-500 italic">—</span>
@@ -112,7 +114,7 @@ const CreatorTableRow = memo(({ index, style, data }: { index: number; style: Re
                   <span className="text-gray-500 font-normal">{itemBids.length} total</span>
                 </div>
                 <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-gray-700">
-                  {itemBids.map((bid: any, bIdx: number) => (
+                  {itemBids.map((bid: BidderEntry, bIdx: number) => (
                     <div
                       key={bIdx}
                       className={`text-xs p-2 rounded-lg flex items-center justify-between border ${
@@ -123,10 +125,10 @@ const CreatorTableRow = memo(({ index, style, data }: { index: number; style: Re
                     >
                       <div className="flex items-center gap-1.5 truncate max-w-[140px]">
                         <span className="font-mono text-[11px] text-gray-400">#{bIdx + 1}</span>
-                        <span className="truncate">{bid.userName || bid.user_name || bid.userEmail || 'Bidder'}</span>
+                        <span className="truncate">{bid.userName || bid.userEmail || 'Bidder'}</span>
                       </div>
                       <span className="font-mono font-bold text-emerald-400">
-                        ${parseFloat(bid.amount).toLocaleString()}
+                        {bid.amount !== null ? `$${bid.amount.toLocaleString()}` : '—'}
                       </span>
                     </div>
                   ))}

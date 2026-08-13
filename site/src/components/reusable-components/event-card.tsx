@@ -6,9 +6,10 @@ import { format } from 'date-fns';
 import { Calendar, Clock, User, ArrowRight, Activity, CheckCircle2, Eye } from 'lucide-react';
 import Cookies from 'js-cookie';
 import { Button } from '@/components/ui/button';
+import { SourcingEvent } from '@/interface/interface';
 
 export interface EventCardProps {
-  event: any;
+  event: SourcingEvent;
 }
 
 const EventCard: React.FC<EventCardProps> = ({ event }) => {
