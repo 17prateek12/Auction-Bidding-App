@@ -61,6 +61,13 @@ export const bidSocketHandler = (io: Server, socket: Socket) => {
     }
   });
 
+  // Leaving event room to clean up stale listeners
+  socket.on('room:leave', ({ eventId }: { eventId: string }) => {
+    if (eventId) {
+      socket.leave(`event:${eventId}`);
+    }
+  });
+
   // Real-time Bidding Event with Role-Based PII Masking & Throttling
   socket.on(
     'bid:place',
