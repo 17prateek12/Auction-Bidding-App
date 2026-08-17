@@ -29,7 +29,7 @@ export const getSocket = (): Socket => {
     });
   } else {
     // Check if token changed (e.g. user logged in or switched account)
-    const currentSocketToken = socket.auth && (socket.auth as any).token;
+    const currentSocketToken = socket.auth && (socket.auth as { token?: string }).token;
     if (currentSocketToken !== token) {
       console.log('🔄 Token changed, updating socket auth and reconnecting...');
       socket.auth = { token };
