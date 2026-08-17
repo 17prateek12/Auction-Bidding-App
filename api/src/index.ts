@@ -29,10 +29,11 @@ io.on('connection', (socket) => {
   bidSocketHandler(io, socket);
 });
 
-const PORT = process.env.PORT;
 app.use(notFound);
 app.use(errorHandler);
 
-httpServer.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+const PORT = Number(process.env.PORT || 8080);
+
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
 });
