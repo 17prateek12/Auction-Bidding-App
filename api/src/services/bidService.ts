@@ -2,6 +2,7 @@ import { pool } from '../connection/postgresConfig';
 import { ApiError } from '../utils/ApiError';
 import { redis } from '../connection/redisConfig';
 import { getSocket } from '../sockets/bidSocket';
+import { placeBidAtomically } from '../utils/luaScripts';
 
 // Reusable Leaderboard Viewer Masking Function for Security & Privacy Compliance
 export const maskLeaderboardForViewer = (
@@ -75,14 +76,11 @@ export const placeBidService = async ({
 
   // 2. Atomic Redis placing check with Outage/Down Fallback protection (Fail-Closed)
   try {
-    // Check if new bid is strictly lower than existing bid ("Always Improve" rule)
-    const currentScore = await redis.zscore(bidsKey, userId);
-    if (currentScore !== null && amount >= parseFloat(currentScore)) {
-      throw new ApiError(400, 'Bids must be strictly lower than your current best bid');
+    // Execute atomic placement via Lua script
+    const luaRes = await placeBidAtomically(bidsKey, userId, amount);
+    if (!luaRes.success) {
+      throw new ApiError(400, luaRes.rankOrMessage);
     }
-
-    // Write to Redis Cache atomically
-    await redis.zadd(bidsKey, amount, userId);
 
     // Retrieve full updated Redis Leaderboard
     const leaderboardRaw = await redis.zrange(bidsKey, 0, -1, 'WITHSCORES');

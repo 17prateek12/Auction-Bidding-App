@@ -30,5 +30,6 @@ export const addBidToSyncQueue = async (bidData: {
     });
   } catch (error) {
     console.error('Error enqueuing bid sync job:', error);
+    throw error;
   }
 };
