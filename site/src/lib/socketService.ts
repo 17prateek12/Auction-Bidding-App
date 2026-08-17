@@ -7,8 +7,9 @@ const SOCKET_URL = API_BASE_URL;
 let socket: Socket | null = null;
 
 export const getSocket = (): Socket => {
+  const token = Cookies.get('token') || Cookies.get('accessToken');
+
   if (!socket) {
-    const token = Cookies.get('token') || Cookies.get('accessToken');
     socket = io(SOCKET_URL, {
       auth: { token },
       autoConnect: true,
@@ -26,6 +27,14 @@ export const getSocket = (): Socket => {
     socket.on('connect_error', (error) => {
       console.error('⚠️ Socket connection error:', error);
     });
+  } else {
+    // Check if token changed (e.g. user logged in or switched account)
+    const currentSocketToken = socket.auth && (socket.auth as any).token;
+    if (currentSocketToken !== token) {
+      console.log('🔄 Token changed, updating socket auth and reconnecting...');
+      socket.auth = { token };
+      socket.disconnect().connect();
+    }
   }
   return socket;
 };
