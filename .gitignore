@@ -9,3 +9,5 @@ site/node_modules
 /site/.env
 /site/.next
 /site/node_modules
+api/dist
+api/backup.sql
