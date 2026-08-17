@@ -56,7 +56,7 @@ const Registration = () => {
             <div className='flex flex-col gap-2'>
                 <p className='text-[12px] font-medium'>Password<span className='text-red-500'>*</span></p>
                 <Input
-                    type='text'
+                    type='password'
                     placeholder='Enter your Password'
                     value={form.password}
                     name='password'
@@ -67,7 +67,7 @@ const Registration = () => {
             <div className='flex flex-col gap-2'>
                 <p className='text-[12px] font-medium'>Confirm Password<span className='text-red-500'>*</span></p>
                 <Input
-                    type='text'
+                    type='password'
                     placeholder='Confirm your Password'
                     value={form.confirmPassword}
                     name='confirmPassword'

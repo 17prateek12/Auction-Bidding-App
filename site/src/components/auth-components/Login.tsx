@@ -30,7 +30,7 @@ const Login = () => {
             <div className='flex flex-col gap-2'>
                 <p className='text-[12px] font-medium'>Password<span className='text-red-500'>*</span></p>
                 <Input
-                    type='text'
+                    type='password'
                     placeholder='Enter your Password'
                     value={password}
                     onChange={(e)=>setPassword(e.target.value)}
